@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sheet2portal
+      POSTGRES_PASSWORD: sheet2portal
+      POSTGRES_DB: sheet2portal
+    ports:
+      - "5433:5432"
+    volumes:
+      - sheet2portal-pgdata:/var/lib/postgresql/data
+
+volumes:
+  sheet2portal-pgdata:
