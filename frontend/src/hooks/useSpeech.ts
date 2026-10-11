@@ -3,6 +3,11 @@ import { synthesizeSpeech } from '../api/voice'
 import { chunkForSpeech, pickVoice } from '../lib/voiceAudio'
 import type { SpeechAudio } from '../types/voice'
 
+// 44-byte WAV with no samples: played inside the mic-tap gesture to unlock
+// audio playback on Safari/iOS, which blocks play() calls made later from
+// async code (after the transcription/LLM round trips).
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='
+
 /**
  * Speaks replies. Engine order:
  *  1. audio the server already synthesized for this reply (Gemini TTS),
@@ -18,6 +23,7 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
   const urlRef = useRef<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const generationRef = useRef(0)
+  const unlockedAudioRef = useRef<HTMLAudioElement | null>(null)
   const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
 
   useEffect(() => {
@@ -44,12 +50,26 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
     setSpeaking(false)
   }, [synth])
 
+  /** Call synchronously from a user gesture (the mic tap) so later playback is allowed. */
+  const prime = useCallback(() => {
+    if (unlockedAudioRef.current) return
+    try {
+      synth?.speak(new SpeechSynthesisUtterance(''))
+    } catch {
+      /* ignore */
+    }
+    const el = new Audio(SILENT_WAV)
+    el.play().catch(() => undefined)
+    unlockedAudioRef.current = el
+  }, [synth])
+
   const playAudio = useCallback((audio: SpeechAudio, generation: number) => {
     if (generation !== generationRef.current) return
     const bytes = Uint8Array.from(atob(audio.base64), (c) => c.charCodeAt(0))
     const url = URL.createObjectURL(new Blob([bytes], { type: audio.mime_type }))
     urlRef.current = url
-    const el = new Audio(url)
+    const el = unlockedAudioRef.current ?? new Audio()
+    el.src = url
     audioRef.current = el
     el.onended = el.onerror = () => {
       if (generation === generationRef.current) setSpeaking(false)
@@ -106,5 +126,5 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
 
   useEffect(() => stop, [stop])
 
-  return { speak, stop, speaking, hasBrowserVoice }
+  return { speak, stop, prime, speaking, hasBrowserVoice }
 }

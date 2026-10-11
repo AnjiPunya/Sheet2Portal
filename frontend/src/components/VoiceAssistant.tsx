@@ -136,6 +136,7 @@ export function VoiceAssistant({
 
   function beginListening(autoStop: boolean) {
     speech.stop() // barge-in: talking over the assistant stops it
+    speech.prime()
     setNotice(null)
     recorder.setError(null)
     void recorder.start({ autoStop })
