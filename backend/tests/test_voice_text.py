@@ -73,6 +73,13 @@ def test_speakable_keeps_telugu_and_trims_at_sentence_boundary():
     assert "బడ్జెట్" in out
 
 
+def test_build_prompt_ends_with_language_example():
+    # Regression: an English vocabulary list at the END made Whisper translate Telugu to English.
+    prompt = build_prompt("auto", ["Projects", "Tasks", "Budget", "Due Date"])
+    assert prompt.startswith("Projects, Tasks, Budget, Due Date. ")
+    assert prompt.endswith("overdue items చూపించు.")
+
+
 def test_build_prompt_includes_vocabulary_within_limit():
     prompt = build_prompt("auto", ["Projects", "Budget", "Vendor Name"])
     assert "total budget ఎంత" in prompt

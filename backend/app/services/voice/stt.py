@@ -61,16 +61,23 @@ class Transcription:
 
 
 def build_prompt(mode: LanguageMode, vocabulary: list[str]) -> str:
-    """Whisper prompt: language-style example plus the workbook's own sheet/field
-    names, so domain words ("Purchase Orders", "Vendor") are spelled right."""
+    """Whisper prompt: the workbook's own sheet/field names (so domain words
+    are spelled right), then the language-style example LAST.
+
+    Whisper treats the prompt as the preceding transcript and continues in
+    its style. Live testing: ending the prompt with the English field list
+    made Whisper *translate* a Telugu follow-up into English ("How many delays
+    are there?"); putting the vocabulary first and ending on the code-mixed
+    example kept it in Telugu script ("మరి వాటిలో ఎన్ని delayed ఉన్నాయి?").
+    """
     base = _EN_PROMPT if mode == "en" else _BASE_PROMPT
-    prompt = base
+    budget = _MAX_PROMPT_CHARS - len(base) - 2
+    terms: list[str] = []
     for word in vocabulary:
-        candidate = f"{prompt} {word}," if prompt != base else f"{prompt} Fields: {word},"
-        if len(candidate) > _MAX_PROMPT_CHARS:
+        if len(", ".join([*terms, word])) > budget:
             break
-        prompt = candidate
-    return prompt.rstrip(",")
+        terms.append(word)
+    return f"{', '.join(terms)}. {base}" if terms else base
 
 
 def _normalise(text: str) -> str:

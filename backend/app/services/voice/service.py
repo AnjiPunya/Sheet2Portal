@@ -43,17 +43,18 @@ class VoiceReply:
 
 
 def workbook_vocabulary(config: PortalConfig, limit: int = 40) -> list[str]:
-    """Worksheet and field names, used to bias transcription toward the workbook's own terms."""
+    """Worksheet names first, then field names: terms used to bias transcription
+    toward the workbook's own vocabulary."""
+    candidates = [e.worksheet for e in config.entities] + [c.name for e in config.entities for c in e.columns]
     words: list[str] = []
     seen: set[str] = set()
-    for entity in config.entities:
-        for name in [entity.worksheet, *(c.name for c in entity.columns)]:
-            name = str(name).strip()[:40]
-            if name and name.lower() not in seen:
-                seen.add(name.lower())
-                words.append(name)
-            if len(words) >= limit:
-                return words
+    for name in candidates:
+        name = str(name).strip()[:40]
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            words.append(name)
+        if len(words) >= limit:
+            break
     return words
 
 
