@@ -47,6 +47,7 @@ export function useVoiceRecorder({ maxSeconds, onComplete, onNoSpeech }: Options
   const frameRef = useRef<number | null>(null)
   const startedAtRef = useRef(0)
   const discardRef = useRef(false)
+  const detectorRef = useRef<SilenceDetector | null>(null)
   const callbacksRef = useRef({ onComplete, onNoSpeech })
   useEffect(() => {
     callbacksRef.current = { onComplete, onNoSpeech }
@@ -117,8 +118,15 @@ export function useVoiceRecorder({ maxSeconds, onComplete, onNoSpeech }: Options
       recorder.onstop = () => {
         const durationMs = performance.now() - startedAtRef.current
         const discard = discardRef.current
+        // Push-to-talk (or a max-length stop) on a clip with no speech at all:
+        // don't upload it -- Whisper "hears" phrases in silence and it costs quota.
+        const silent = detectorRef.current !== null && !detectorRef.current.heardSpeech
         teardown()
         setState('idle')
+        if (!discard && silent) {
+          callbacksRef.current.onNoSpeech()
+          return
+        }
         if (!discard && chunks.length) {
           callbacksRef.current.onComplete({ blob: new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' }), durationMs })
         }
@@ -127,7 +135,9 @@ export function useVoiceRecorder({ maxSeconds, onComplete, onNoSpeech }: Options
       // Level meter + voice-activity detection.
       const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       const detector = new SilenceDetector({ maxMs: maxSeconds * 1000 })
+      detectorRef.current = null
       if (AudioCtx) {
+        detectorRef.current = detector
         const ctx = new AudioCtx()
         audioCtxRef.current = ctx
         const analyser = ctx.createAnalyser()
@@ -144,9 +154,7 @@ export function useVoiceRecorder({ maxSeconds, onComplete, onNoSpeech }: Options
             return
           }
           if (autoStop && verdict === 'no-speech') {
-            discardRef.current = true
-            stop()
-            callbacksRef.current.onNoSpeech()
+            stop() // onstop sees no speech and reports it
             return
           }
           frameRef.current = requestAnimationFrame(tick)

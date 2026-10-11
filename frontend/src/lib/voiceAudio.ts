@@ -38,6 +38,8 @@ export function rmsLevel(samples: ArrayLike<number>): number {
   return Math.sqrt(sum / samples.length)
 }
 
+const MAX_NOISE_FLOOR = 0.03
+
 export type SilenceVerdict = 'continue' | 'stop' | 'no-speech' | 'max-duration'
 
 export interface SilenceDetectorOptions {
@@ -75,7 +77,10 @@ export class SilenceDetector {
   }
 
   get threshold(): number {
-    const floor = this.noiseCount ? this.noiseSum / this.noiseCount : 0
+    // Cap the calibrated floor: if the user starts talking the instant they
+    // tap, the "noise" sample is really speech, and an uncapped floor would
+    // set the threshold above their own voice so it never counts as speech.
+    const floor = Math.min(this.noiseCount ? this.noiseSum / this.noiseCount : 0, MAX_NOISE_FLOOR)
     return Math.max(this.minThreshold, floor * 2.5)
   }
 

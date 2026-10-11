@@ -68,7 +68,18 @@ test('SilenceDetector adapts its threshold to background noise', () => {
   // Constant fan noise at 0.03 (above the 0.02 floor) must not count as speech.
   const r = run(d, [[0.03, 5000]])
   assert.equal(r.verdict, 'no-speech')
-  assert.ok(d.threshold >= 0.07)
+  assert.ok(d.threshold >= 0.07 && d.threshold <= 0.075 + 1e-9)
+})
+
+test('SilenceDetector still hears a user who starts talking immediately', () => {
+  // Speech during the 300ms calibration window must not raise the threshold above the speech itself.
+  const d = new SilenceDetector({ silenceMs: 1000 })
+  const r = run(d, [
+    [0.12, 2000],
+    [0.004, 3000],
+  ])
+  assert.equal(r.verdict, 'stop')
+  assert.ok(d.heardSpeech)
 })
 
 test('SilenceDetector enforces the max duration', () => {
