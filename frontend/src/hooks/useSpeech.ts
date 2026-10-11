@@ -8,6 +8,13 @@ import type { SpeechAudio } from '../types/voice'
 // async code (after the transcription/LLM round trips).
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='
 
+function startPlayback(el: HTMLAudioElement, url: string, onDone: () => void) {
+  el.src = url
+  el.onended = onDone
+  el.onerror = onDone
+  el.play().catch(onDone) // autoplay blocked: the text is still on screen
+}
+
 /**
  * Speaks replies. Engine order:
  *  1. audio the server already synthesized for this reply (Gemini TTS),
@@ -69,13 +76,11 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
     const url = URL.createObjectURL(new Blob([bytes], { type: audio.mime_type }))
     urlRef.current = url
     const el = unlockedAudioRef.current ?? new Audio()
-    el.src = url
     audioRef.current = el
-    el.onended = el.onerror = () => {
-      if (generation === generationRef.current) setSpeaking(false)
-    }
     setSpeaking(true)
-    el.play().catch(() => setSpeaking(false)) // autoplay blocked: text is still on screen
+    startPlayback(el, url, () => {
+      if (generation === generationRef.current) setSpeaking(false)
+    })
   }, [])
 
   /** Returns false when no engine could speak this language (caller may show a hint). */
