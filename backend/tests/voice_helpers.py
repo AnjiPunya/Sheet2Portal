@@ -39,6 +39,10 @@ class FakeVoiceAPIs:
         self.groq_responses.append(httpx.Response(status, headers=headers or {}, json={"error": {"message": "x"}}))
         return self
 
+    def gemini_stt_status(self, status: int):
+        self.gemini_stt_responses.append(httpx.Response(status, json={"error": {"message": "x"}}))
+        return self
+
     def gemini_stt(self, text: str, language: str):
         body = {"candidates": [{"content": {"parts": [{"text": json.dumps({"text": text, "language": language})}]}}]}
         self.gemini_stt_responses.append(httpx.Response(200, json=body))

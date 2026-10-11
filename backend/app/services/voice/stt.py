@@ -161,12 +161,27 @@ class GeminiTranscriber:
 
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str, timeout: float):
+    def __init__(self, api_key: str, model: str, timeout: float, fallback_models: tuple[str, ...] = ()):
         self._api_key = api_key
         self.model = model
+        self._models = [model, *(m for m in fallback_models if m and m != model)]
         self._timeout = timeout
 
     async def transcribe(self, clip: AudioClip, mode: LanguageMode, vocabulary: list[str]) -> Transcription:
+        last_exc: ProviderError | None = None
+        for model in self._models:
+            try:
+                return await self._transcribe_with(model, clip, mode, vocabulary)
+            except (ProviderRateLimited, ProviderUnavailable) as exc:
+                last_exc = exc
+            except ProviderError as exc:
+                if "HTTP 404" not in str(exc):
+                    raise
+                last_exc = exc
+        assert last_exc is not None
+        raise last_exc
+
+    async def _transcribe_with(self, model: str, clip: AudioClip, mode: LanguageMode, vocabulary: list[str]) -> Transcription:
         hint = {"te": " The speaker is using Telugu.", "en": " The speaker is using English."}.get(mode, "")
         if vocabulary:
             hint += " Words that may appear: " + ", ".join(vocabulary[:30]) + "."
@@ -183,7 +198,7 @@ class GeminiTranscriber:
         }
         response = await http.post(
             "Gemini",
-            GEMINI_GENERATE_URL.format(model=self.model),
+            GEMINI_GENERATE_URL.format(model=model),
             self._timeout,
             audio_request=True,
             headers={"x-goog-api-key": self._api_key},
@@ -203,7 +218,7 @@ class GeminiTranscriber:
             stt_language=normalize_stt_language(language),
             duration_seconds=None,
             provider=self.name,
-            model=self.model,
+            model=model,
             silent=language == "none" or not _normalise(text),
         )
 
@@ -212,7 +227,8 @@ def _build(name: str, settings: Settings, voice: VoiceSettings):
     if name == "groq" and settings.groq_api_key:
         return GroqWhisperTranscriber(settings.groq_api_key, voice.stt_model, voice.stt_timeout_seconds)
     if name == "gemini" and settings.gemini_api_key:
-        return GeminiTranscriber(settings.gemini_api_key, voice.gemini_stt_model, voice.stt_timeout_seconds)
+        fallbacks = tuple(m.strip() for m in voice.gemini_stt_fallback_models.split(",") if m.strip())
+        return GeminiTranscriber(settings.gemini_api_key, voice.gemini_stt_model, voice.stt_timeout_seconds, fallbacks)
     return None
 
 

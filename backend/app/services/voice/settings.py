@@ -18,6 +18,9 @@ class VoiceSettings(BaseSettings):
     stt_provider: str = "groq"  # "groq" (Whisper) or "gemini" (audio-understanding fallback)
     stt_model: str = "whisper-large-v3"
     gemini_stt_model: str = "gemini-flash-latest"
+    # Gemini free-tier quotas are per model and small (live: 20 requests/day
+    # on the Flash model), so the STT fallback tries these next on 429/5xx/404.
+    gemini_stt_fallback_models: str = "gemini-flash-lite-latest"
     stt_timeout_seconds: float = 30.0
 
     # Upload limits. Opus from MediaRecorder is ~16-32 kbps, so 60s is well

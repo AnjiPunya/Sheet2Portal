@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from app.services.ai.base import ChatMessage, ChatResult, ProviderRateLimited, ToolCall
+from app.services.ai.base import ChatMessage, ChatResult, ProviderRateLimited, ProviderUnavailable, ToolCall
 from app.services.voice.audio import pcm_to_wav
 from tests.voice_helpers import WEBM_AUDIO, FakeVoiceAPIs
 
@@ -255,6 +255,19 @@ def test_llm_rate_limit_falls_back_to_next_provider(client, multi_sheet_xlsx, ke
     assert r.json()["message"] == "The total budget is 35000."
 
 
+def test_llm_unavailable_falls_back_to_next_provider(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    from app.api.routes import voice as voice_route
+
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("What is the total budget?", language="english")
+    _patch_llm(monkeypatch, RaisingProvider(ProviderUnavailable("gemini returned HTTP 503")))
+    backup = RecordingProvider([_answer("35000.")])
+    backup.name = "backup"
+    monkeypatch.setattr(voice_route, "fallback_providers", lambda primary_name: [backup])
+    r = _turn(client, workbook_id)
+    assert r.status_code == 200 and r.json()["provider"] == "backup"
+
+
 def test_english_reply_to_mixed_question_is_rewritten_keeping_numbers(client, multi_sheet_xlsx, keys, apis, monkeypatch):
     workbook_id = _upload(client, multi_sheet_xlsx)
     apis.groq("Projects sheet లో total budget ఎంత?")
@@ -434,6 +447,16 @@ def test_stt_rate_limit_falls_back_to_gemini(client, multi_sheet_xlsx, keys, api
     body = _turn(client, workbook_id).json()
     assert body["stt_provider"] == "gemini"
     assert body["language"] == "mixed"
+
+
+def test_gemini_stt_falls_back_to_lite_model_on_daily_quota(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq_status(429).gemini_stt_status(429).gemini_stt("Projects లో budget ఎంత?", "mixed")
+    _patch_llm(monkeypatch, RecordingProvider([_answer("Projects లో budget 35000.")]))
+    body = _turn(client, workbook_id).json()
+    assert body["stt_provider"] == "gemini"
+    gemini_urls = [str(r.url) for r in apis.requests if "generativelanguage" in str(r.url)]
+    assert "gemini-flash-latest:" in gemini_urls[0] and "gemini-flash-lite-latest:" in gemini_urls[1]
 
 
 def test_llm_rate_limit_returns_429(client, multi_sheet_xlsx, keys, apis, monkeypatch):

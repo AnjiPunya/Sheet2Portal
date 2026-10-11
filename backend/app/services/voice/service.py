@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.services.ai.base import ChatMessage, LLMProvider, ProviderError, ProviderRateLimited
+from app.services.ai.base import ChatMessage, LLMProvider, ProviderError, ProviderRateLimited, ProviderUnavailable
 from app.services.ai.orchestrator import extract_references, run_chat_turn
 from app.services.ai.tools import ChatContext
 from app.services.analysis.types import PortalConfig
@@ -132,9 +132,10 @@ async def run_voice_reply(
 ) -> VoiceReply:
     """Run one chat turn through the *unchanged* orchestrator, styled for voice.
 
-    If the provider is rate limited, the whole turn is retried on each
-    ``fallbacks`` provider in order (free-tier tokens-per-minute caps are hit
-    easily by back-to-back voice turns). Other provider errors propagate (the
+    If the provider is rate limited or unavailable (5xx, e.g. Gemini's
+    "model overloaded" 503), the whole turn is retried on each ``fallbacks``
+    provider in order -- free-tier tokens-per-minute caps are hit easily by
+    back-to-back voice turns. Other provider errors propagate (the
     route maps them to HTTP codes). TTS errors don't: the text answer is still
     useful, so they're reported in ``tts_error`` and the client can fall back
     to browser speech.
@@ -152,7 +153,7 @@ async def run_voice_reply(
             )
             provider = candidate
             break
-        except ProviderRateLimited:
+        except (ProviderRateLimited, ProviderUnavailable):
             if index == len(candidates) - 1:
                 raise
     message = (result.message.content or "").strip()
