@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.services.ai.base import ProviderError, ProviderNotConfigured
+from app.services.ai.base import ProviderError, ProviderNotConfigured, ProviderRateLimited, ProviderUnavailable
 from app.services.voice import http
 from app.services.voice.audio import pcm_to_wav
 from app.services.voice.settings import VoiceSettings
@@ -47,9 +47,28 @@ async def synthesize(text: str, settings: Settings, voice: VoiceSettings) -> Spe
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice.tts_voice}}},
         },
     }
+    # Free-tier TTS quotas are per model and tiny (live: 3 requests/minute on
+    # flash-lite-tts), so a rate-limited/unavailable/retired model falls
+    # through to the next one, each of which has its own quota.
+    models = [voice.tts_model] + [m.strip() for m in voice.tts_fallback_models.split(",") if m.strip() and m.strip() != voice.tts_model]
+    last_exc: ProviderError | None = None
+    for model in models:
+        try:
+            return await _synthesize_with(model, payload, settings, voice)
+        except (ProviderRateLimited, ProviderUnavailable) as exc:
+            last_exc = exc
+        except ProviderError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+async def _synthesize_with(model: str, payload: dict, settings: Settings, voice: VoiceSettings) -> SpeechAudio:
     response = await http.post(
         "Gemini TTS",
-        GEMINI_GENERATE_URL.format(model=voice.tts_model),
+        GEMINI_GENERATE_URL.format(model=model),
         voice.tts_timeout_seconds,
         headers={"x-goog-api-key": settings.gemini_api_key},
         json=payload,
@@ -64,4 +83,4 @@ async def synthesize(text: str, settings: Settings, voice: VoiceSettings) -> Spe
     if "wav" not in mime.lower() and audio[:4] != b"RIFF":
         match = _RATE.search(mime)
         audio = pcm_to_wav(audio, sample_rate=int(match.group(1)) if match else 24000)
-    return SpeechAudio(data=audio, mime_type="audio/wav", provider="gemini", model=voice.tts_model)
+    return SpeechAudio(data=audio, mime_type="audio/wav", provider="gemini", model=model)

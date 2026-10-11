@@ -290,9 +290,19 @@ def test_tts_requested_returns_wav_audio(client, multi_sheet_xlsx, keys, apis, m
     assert tts_req.headers["x-goog-api-key"] == "test-gemini-key"
 
 
+def test_tts_rate_limit_falls_back_to_next_model(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    wav = pcm_to_wav(b"\x00\x00" * 10)
+    apis.tts(status=429).tts(audio=wav, mime="audio/wav")
+    r = client.post(f"/api/workbooks/{workbook_id}/voice/speak", json={"text": "hello"})
+    assert r.status_code == 200
+    urls = [str(q.url) for q in apis.requests if "tts" in str(q.url)]
+    assert "gemini-3.8-flash-lite-tts" in urls[0] and "gemini-3.8-flash-tts:" in urls[1]
+
+
 def test_tts_failure_still_returns_text(client, multi_sheet_xlsx, keys, apis, monkeypatch):
     workbook_id = _upload(client, multi_sheet_xlsx)
-    apis.groq("budget?", language="english").tts(status=429)
+    apis.groq("budget?", language="english").tts(status=429).tts(status=429).tts(status=429)
     _patch_llm(monkeypatch, RecordingProvider([_answer("35000.")]))
     r = _turn(client, workbook_id, tts="true")
     assert r.status_code == 200

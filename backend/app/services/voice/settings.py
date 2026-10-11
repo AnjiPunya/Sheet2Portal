@@ -32,6 +32,9 @@ class VoiceSettings(BaseSettings):
     # it can be switched off with VOICE_SERVER_TTS_ENABLED=false.
     server_tts_enabled: bool = True
     tts_model: str = "gemini-3.8-flash-lite-tts"
+    # Tried in order when the primary model is rate limited (3 RPM per model
+    # on the free tier, measured live), unavailable or retired.
+    tts_fallback_models: str = "gemini-3.8-flash-tts,gemini-2.5-flash-preview-tts"
     tts_voice: str = "Kore"
     tts_timeout_seconds: float = 30.0
     tts_max_chars: int = 600
