@@ -5,6 +5,7 @@ import { ApiRequestError } from '../api/client'
 import type { ChatMessage, ChatReference } from '../types/chat'
 import { ChatMarkdown } from './ChatMarkdown'
 import { usePortalNav } from './portalContext'
+import { VoiceAssistant } from './VoiceAssistant'
 
 interface DisplayMessage extends ChatMessage {
   references?: ChatReference[]
@@ -160,6 +161,16 @@ export function ChatWidget({
               </div>
             )}
           </div>
+
+          <VoiceAssistant
+            workbookId={workbookId}
+            history={messages}
+            disabled={sendMutation.isPending}
+            onTranscript={(text) => setMessages((prev) => [...prev, { role: 'user', content: text }])}
+            onReply={(reply) =>
+              setMessages((prev) => [...prev, { role: 'assistant', content: reply.message, references: reply.references }])
+            }
+          />
 
           <form
             onSubmit={(e) => {

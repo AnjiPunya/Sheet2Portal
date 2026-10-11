@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import chat, health, portal, workbooks
+from app.api.routes import voice
 
 app = FastAPI(title="Sheet2Portal API")
 
@@ -16,3 +17,4 @@ app.include_router(health.router)
 app.include_router(workbooks.router)
 app.include_router(portal.router)
 app.include_router(chat.router)
+app.include_router(voice.router)
