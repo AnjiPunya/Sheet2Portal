@@ -3,7 +3,13 @@
 import pytest
 
 from app.services.voice.audio import AudioValidationError, pcm_to_wav, sniff_format, validate_audio, wav_duration_seconds
-from app.services.voice.language import browser_voice_lang, classify_transcript, normalize_stt_language, reply_instruction
+from app.services.voice.language import (
+    browser_voice_lang,
+    classify_transcript,
+    fold_indic_into_telugu,
+    normalize_stt_language,
+    reply_instruction,
+)
 from app.services.voice.speakable import to_speakable
 from app.services.voice.stt import build_prompt, looks_silent
 
@@ -113,3 +119,16 @@ def test_sniff_and_validate_audio():
     with pytest.raises(AudioValidationError) as bad:
         validate_audio(b"<html>not audio</html>", 1000, 10)
     assert bad.value.status_code == 415
+
+
+def test_fold_stray_indic_letters_into_telugu():
+    # Real Whisper output from a live test: Devanagari/Bengali letters inside Telugu words.
+    raw = "ప्रोजেक्स శीट లो total budget ఎంత? pending tasks ఎంణ్ని ఉన్నాయि?"
+    folded = fold_indic_into_telugu(raw)
+    assert folded == "ప్రోజేక్స శీట లో total budget ఎంత? pending tasks ఎంణ్ని ఉన్నాయి?"
+    assert all(not (0x0900 <= ord(c) <= 0x09FF) for c in folded)
+
+
+def test_fold_leaves_real_hindi_and_english_alone():
+    assert fold_indic_into_telugu("कुल बजट कितना है?") == "कुल बजट कितना है?"
+    assert fold_indic_into_telugu("What is the total?") == "What is the total?"

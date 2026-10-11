@@ -10,7 +10,13 @@ from app.services.ai.orchestrator import extract_references, run_chat_turn
 from app.services.ai.tools import ChatContext
 from app.services.analysis.types import PortalConfig
 from app.services.voice import tts
-from app.services.voice.language import DetectedLanguage, browser_voice_lang, classify_transcript, reply_instruction
+from app.services.voice.language import (
+    DetectedLanguage,
+    browser_voice_lang,
+    classify_transcript,
+    reply_instruction,
+    reply_reminder,
+)
 from app.services.voice.settings import VoiceSettings
 from app.services.voice.speakable import to_speakable
 from app.services.voice.style import VoiceStyleProvider
@@ -82,7 +88,7 @@ async def run_voice_reply(
     don't: the text answer is still useful, so they're reported in
     ``tts_error`` and the client can fall back to browser speech.
     """
-    styled = VoiceStyleProvider(provider, reply_instruction(language))
+    styled = VoiceStyleProvider(provider, reply_instruction(language), reply_reminder(language))
     result, tool_log = await run_chat_turn(
         styled,
         history,

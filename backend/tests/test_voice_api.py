@@ -109,7 +109,9 @@ def test_voice_turn_replies_in_users_language(
     assert system.role == "system"
     assert "data assistant" in system.content  # orchestrator's own prompt kept
     assert instruction_marker in system.content
-    assert llm.calls[0][-1].content == transcript
+    last_user = llm.calls[0][-1]
+    assert last_user.role == "user" and last_user.content.startswith(transcript)
+    assert "(Voice reply:" in last_user.content  # per-turn language reminder, server-side only
 
 
 def test_auto_mode_sends_codemixed_prompt_and_no_language(client, multi_sheet_xlsx, keys, apis, monkeypatch):
@@ -161,12 +163,15 @@ def test_follow_up_history_is_forwarded(client, multi_sheet_xlsx, keys, apis, mo
         {"role": "assistant", "content": "Website Revamp budget 10000."},
     ]
     body = _turn(client, workbook_id, history=history).json()
-    sent = [(m.role, m.content) for m in llm.calls[0][1:]]
+    sent = [(m.role, m.content.split("\n\n(Voice reply:")[0]) for m in llm.calls[0][1:]]
     assert sent == [
         ("user", "Website Revamp budget entha?"),
         ("assistant", "Website Revamp budget 10000."),
         ("user", "mari Mobile App di entha?"),
     ]
+    # only the latest user turn carries the reminder
+    assert "(Voice reply:" not in llm.calls[0][1].content
+    assert "Telugu-English mix" in llm.calls[0][3].content
     assert body["language"] == "mixed"
 
 
@@ -189,6 +194,37 @@ def test_voice_turn_runs_workbook_tools(client, multi_sheet_xlsx, keys, apis, mo
     # voice instruction applied on every LLM call of the turn, incl. after tools
     assert "Tenglish" in llm.calls[1][0].content
     assert body["speakable"] == "Projects లో total budget 35000."
+
+
+def test_groq_tool_validation_400_is_retried_once(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    from app.services.ai.base import ProviderError
+
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("pending tasks ఎన్ని?")
+
+    class FlakyToolProvider(RecordingProvider):
+        async def chat(self, messages, tools=None):
+            self.calls.append(list(messages))
+            if len(self.calls) == 1:
+                raise ProviderError('groq returned HTTP 400: {"error":{"message":"Tool call validation failed: ..."}}')
+            return _answer("1 pending task ఉంది.")
+
+    llm = FlakyToolProvider([])
+    _patch_llm(monkeypatch, llm)
+    r = _turn(client, workbook_id)
+    assert r.status_code == 200
+    assert len(llm.calls) == 2
+
+
+def test_other_provider_errors_are_not_retried(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    from app.services.ai.base import ProviderError
+
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("hello", language="english")
+    _patch_llm(monkeypatch, RaisingProvider(ProviderError("groq returned HTTP 400: context too long")))
+    r = _turn(client, workbook_id)
+    assert r.status_code == 502
+    assert r.json()["detail"]["error_code"] == "PROVIDER_ERROR"
 
 
 def test_transcribe_then_respond_flow(client, multi_sheet_xlsx, keys, apis, monkeypatch):

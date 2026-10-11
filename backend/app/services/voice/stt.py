@@ -22,7 +22,7 @@ from app.core.config import Settings
 from app.services.ai.base import ProviderError, ProviderNotConfigured, ProviderRateLimited, ProviderUnavailable
 from app.services.voice import http
 from app.services.voice.audio import AudioClip
-from app.services.voice.language import LanguageMode, normalize_stt_language
+from app.services.voice.language import LanguageMode, fold_indic_into_telugu, normalize_stt_language
 from app.services.voice.settings import VoiceSettings
 
 GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -121,7 +121,7 @@ class GroqWhisperTranscriber:
             body = await self._request(clip, "te", prompt)
             reported = body.get("language")
 
-        text = (body.get("text") or "").strip()
+        text = fold_indic_into_telugu((body.get("text") or "").strip())
         segments = body.get("segments") or []
         return Transcription(
             text=text,
@@ -181,7 +181,7 @@ class GeminiTranscriber:
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ProviderError("Gemini returned an unreadable transcription") from exc
 
-        text = str(parsed.get("text") or "").strip()
+        text = fold_indic_into_telugu(str(parsed.get("text") or "").strip())
         language = str(parsed.get("language") or "")
         return Transcription(
             text=text,
