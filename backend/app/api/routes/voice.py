@@ -74,7 +74,15 @@ def _provider_http_error(exc: ProviderError, what: str) -> HTTPException:
         return _error(502, "PROVIDER_UNAVAILABLE", f"{what} is temporarily unavailable.")
     if isinstance(exc, ProviderRejectedAudio):
         return _error(422, "AUDIO_UNREADABLE", "The recording couldn't be decoded. Please try recording again.")
-    return _error(502, "PROVIDER_ERROR", str(exc))
+    # Never show raw provider response bodies to end users (found in the
+    # browser e2e run: Cerebras' 402 JSON appeared verbatim in the chat).
+    text = str(exc)
+    name = text.split(" ", 1)[0] if text else what
+    if "HTTP 402" in text:
+        return _error(502, "PROVIDER_QUOTA_EXHAUSTED", f"{what}: the {name} free quota or billing is exhausted. Try again later.")
+    if "rejected the configured API key" in text:
+        return _error(502, "PROVIDER_AUTH_FAILED", f"{what}: the server's {name} API key was rejected.")
+    return _error(502, "PROVIDER_ERROR", f"{what} returned an error. Please try again.")
 
 
 def fallback_providers(primary_name: str) -> list:
@@ -145,7 +153,7 @@ async def _reply(ctx: ChatContext, messages: list[ChatMessageIn], mode: str, wan
             fallbacks=fallback_providers(provider.name),
         )
     except ProviderError as exc:
-        raise _provider_http_error(exc, provider.name) from exc
+        raise _provider_http_error(exc, "The AI assistant") from exc
 
 
 def _parse_history(raw: str | None) -> list[ChatMessageIn]:

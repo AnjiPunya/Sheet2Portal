@@ -237,6 +237,20 @@ def test_other_provider_errors_are_not_retried(client, multi_sheet_xlsx, keys, a
     r = _turn(client, workbook_id)
     assert r.status_code == 502
     assert r.json()["detail"]["error_code"] == "PROVIDER_ERROR"
+    assert "context too long" not in r.json()["detail"]["message"]  # raw provider text not leaked
+
+
+def test_llm_payment_required_is_reported_plainly(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    from app.services.ai.base import ProviderError
+
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("hello", language="english")
+    raw = 'cerebras returned HTTP 402: {"message":"Payment required to access this resource."}'
+    _patch_llm(monkeypatch, RaisingProvider(ProviderError(raw)))
+    r = _turn(client, workbook_id)
+    detail = r.json()["detail"]
+    assert r.status_code == 502 and detail["error_code"] == "PROVIDER_QUOTA_EXHAUSTED"
+    assert "{" not in detail["message"] and "cerebras" in detail["message"]
 
 
 def test_llm_rate_limit_falls_back_to_next_provider(client, multi_sheet_xlsx, keys, apis, monkeypatch):
