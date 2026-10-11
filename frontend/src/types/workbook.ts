@@ -19,6 +19,7 @@ export interface WorksheetOut {
 export interface WorkbookOut {
   id: string
   original_filename: string
+  display_title: string | null
   status: WorkbookStatus
   error_code: string | null
   error_message: string | null

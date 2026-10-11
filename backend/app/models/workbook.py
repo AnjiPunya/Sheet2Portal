@@ -22,6 +22,7 @@ class Workbook(Base):
         Uuid, ForeignKey("tenants.id"), nullable=False, index=True
     )
     original_filename: Mapped[str] = mapped_column(String, nullable=False)
+    display_title: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     stored_path: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[WorkbookStatus] = mapped_column(
         String, default=WorkbookStatus.processing, nullable=False

@@ -1,5 +1,6 @@
 import { API_BASE_URL, throwApiError } from './client'
 import type { PortalConfig, RecordDetail, RecordPage } from '../types/portal'
+import { buildRecordParams, type RecordQuery } from '../lib/recordQuery'
 
 export async function fetchPortalConfig(workbookId: string): Promise<PortalConfig> {
   const res = await fetch(`${API_BASE_URL}/api/workbooks/${workbookId}/portal`)
@@ -7,24 +8,12 @@ export async function fetchPortalConfig(workbookId: string): Promise<PortalConfi
   return res.json()
 }
 
-export interface RecordQuery {
-  search?: string
-  status?: string
-  page?: number
-  pageSize?: number
-}
-
 export async function fetchRecords(
   workbookId: string,
   worksheet: string,
   query: RecordQuery = {},
 ): Promise<RecordPage> {
-  const params = new URLSearchParams()
-  if (query.search) params.set('search', query.search)
-  if (query.status) params.set('status', query.status)
-  params.set('page', String(query.page ?? 1))
-  params.set('page_size', String(query.pageSize ?? 25))
-
+  const params = buildRecordParams(query)
   const res = await fetch(
     `${API_BASE_URL}/api/workbooks/${workbookId}/worksheets/${encodeURIComponent(worksheet)}/records?${params}`,
   )

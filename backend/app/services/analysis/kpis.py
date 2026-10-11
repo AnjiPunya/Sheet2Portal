@@ -9,6 +9,7 @@ not produced -- nothing is estimated or hardcoded to fill the gap.
 import re
 from datetime import date, datetime
 
+from app.services.analysis.text import humanize
 from app.services.analysis.types import (
     ColumnProfile,
     EntityConfig,
@@ -179,7 +180,8 @@ def compute_entity_kpis(entity: EntityConfig, rows: list[dict]) -> tuple[list[KP
         values = [v for v in values if v is not None]
         if not values:
             continue
-        label = col.name if col.name.strip().lower().startswith("total") else f"Total {col.name}"
+        display_name = humanize(col.name)
+        label = display_name if display_name.lower().startswith("total") else f"Total {display_name}"
         kpis.append(
             KPIDefinition(
                 key=f"{entity.worksheet}:sum:{col.name}",

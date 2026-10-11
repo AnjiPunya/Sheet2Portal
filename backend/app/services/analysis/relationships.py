@@ -11,7 +11,7 @@ confirmed relationship from a weak guess rather than asserting one.
 """
 
 from app.services.analysis.text import normalize_key
-from app.services.analysis.types import EntityConfig, RelationshipCandidate
+from app.services.analysis.types import EntityConfig, IdentifiedRow, PortalConfig, RelationshipCandidate
 
 _SUFFIXES = ("id", "name", "code", "no", "number", "ref")
 
@@ -95,3 +95,63 @@ def detect_relationships(
             )
 
     return candidates
+
+
+def related_rows_for(
+    worksheet: str,
+    record_data: dict,
+    config: PortalConfig,
+    rows_by_entity: dict[str, list[IdentifiedRow]],
+) -> list[dict]:
+    """Find records related to ``record_data`` (a row from ``worksheet``) via
+    the config's already-detected relationships, in both directions:
+    outgoing (this row references another entity) and incoming (another
+    entity's rows reference this one, by identifier or title). Shared by the
+    record-detail API and the chatbot's traverse-relationship tool so both
+    stay behaviorally identical.
+    """
+    related: list[dict] = []
+
+    for rel in config.relationships:
+        if rel.from_entity != worksheet:
+            continue
+        value = record_data.get(rel.from_column)
+        if value is None or str(value).strip() == "":
+            continue
+        matches = [
+            row
+            for row in rows_by_entity.get(rel.to_entity, [])
+            if str(row.data.get(rel.to_column, "")).strip().lower() == str(value).strip().lower()
+        ]
+        if matches:
+            related.append(
+                {
+                    "entity": rel.to_entity,
+                    "relationship": f"{rel.from_column} -> {rel.to_entity}",
+                    "records": [{"id": m.id, "data": m.data} for m in matches],
+                }
+            )
+
+    entity = next((e for e in config.entities if e.worksheet == worksheet), None)
+    identity_columns = {c for c in (entity.identifier_column, entity.title_column) if c} if entity else set()
+    for rel in config.relationships:
+        if rel.to_entity != worksheet or rel.to_column not in identity_columns:
+            continue
+        own_value = record_data.get(rel.to_column)
+        if own_value is None:
+            continue
+        matches = [
+            row
+            for row in rows_by_entity.get(rel.from_entity, [])
+            if str(row.data.get(rel.from_column, "")).strip().lower() == str(own_value).strip().lower()
+        ]
+        if matches:
+            related.append(
+                {
+                    "entity": rel.from_entity,
+                    "relationship": f"{rel.from_entity}.{rel.from_column}",
+                    "records": [{"id": m.id, "data": m.data} for m in matches],
+                }
+            )
+
+    return related

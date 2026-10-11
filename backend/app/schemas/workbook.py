@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ColumnOut(BaseModel):
@@ -28,10 +28,18 @@ class WorkbookOut(BaseModel):
 
     id: uuid.UUID
     original_filename: str
+    display_title: str | None
     status: str
     error_code: str | None
     error_message: str | None
     worksheets: list[WorksheetOut]
+
+
+class WorkbookTitleUpdate(BaseModel):
+    """PATCH body for customizing a portal's title. An empty/whitespace-only
+    title resets to the generated default rather than storing a blank name."""
+
+    title: str | None = Field(default=None, max_length=200)
 
 
 class ErrorResponse(BaseModel):

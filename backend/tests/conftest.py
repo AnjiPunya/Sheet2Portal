@@ -9,6 +9,17 @@ from app.core.db import Base, get_db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def _no_real_provider_keys(monkeypatch):
+    """Tests must never see (or spend) real API keys from a developer's .env."""
+    from app.core.config import settings
+
+    for field in ("groq_api_key", "gemini_api_key", "openrouter_api_key", "cerebras_api_key"):
+        monkeypatch.setattr(settings, field, "")
+    monkeypatch.setattr(settings, "chatbot_provider", "groq")
+    monkeypatch.setattr(settings, "chatbot_model", "")
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """A TestClient wired to an isolated in-memory SQLite DB and a temp upload dir.

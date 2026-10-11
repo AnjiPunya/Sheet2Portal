@@ -1,4 +1,5 @@
 import type { KPIDefinition } from '../types/portal'
+import { formatLabel } from '../lib/labels'
 
 export function AlertsBanner({
   alerts,
@@ -12,7 +13,7 @@ export function AlertsBanner({
   const hasCritical = alerts.some((a) => a.severity === 'critical')
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-3">
         <svg
           className={`mt-0.5 h-5 w-5 flex-shrink-0 ${hasCritical ? 'text-red-500' : 'text-amber-500'}`}
@@ -28,7 +29,7 @@ export function AlertsBanner({
         <div>
           <p className="font-semibold text-slate-800">Action Required</p>
           <p className="text-sm text-slate-600">
-            {alerts.map((a) => `${a.value} ${a.label.toLowerCase()}`).join(' · ')}
+            {alerts.map((a) => `${a.value} ${formatLabel(a.label).toLowerCase()}`).join(' · ')}
           </p>
         </div>
       </div>
@@ -37,10 +38,10 @@ export function AlertsBanner({
           <button
             key={alert.key}
             onClick={() => alert.entity && onSelectEntity(alert.entity)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium text-white transition-colors
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors
               ${alert.severity === 'critical' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}
           >
-            Review {alert.label} ({alert.value})
+            Review {formatLabel(alert.label)} ({alert.value})
           </button>
         ))}
       </div>

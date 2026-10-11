@@ -98,6 +98,16 @@ class EntityConfig:
 
 
 @dataclass
+class IdentifiedRow:
+    """A data row paired with its persisted record id -- the minimal shape
+    relationship traversal needs, independent of whether the caller is
+    working with SQLAlchemy ``Record`` objects or something else."""
+
+    id: str
+    data: dict
+
+
+@dataclass
 class SheetData:
     """Input to the analysis engine: a worksheet's already-parsed columns and rows."""
 

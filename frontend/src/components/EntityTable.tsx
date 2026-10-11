@@ -1,9 +1,12 @@
 import type { ColumnProfile, EntityConfig, RecordItem } from '../types/portal'
 import { StatusBadge } from './StatusBadge'
 import { formatCellValue } from '../lib/format'
+import { formatLabel } from '../lib/labels'
 import { isLowStock } from '../lib/lowStock'
 
 const MAX_COLUMNS = 7
+
+const isNumeric = (col: ColumnProfile) => col.inferred_type === 'int' || col.inferred_type === 'float'
 
 function pickDisplayColumns(entity: EntityConfig): ColumnProfile[] {
   const lowStockColumns = new Set(
@@ -41,17 +44,27 @@ export function EntityTable({
   const riskByStatus = new Map(entity.status_breakdown.map((s) => [s.value, s.is_risk]))
 
   if (records.length === 0) {
-    return <p className="py-8 text-center text-sm text-slate-400">No records match the current filters.</p>
+    return (
+      <div className="panel px-6 py-12 text-center">
+        <p className="text-sm font-medium text-slate-700">No records match the current filters</p>
+        <p className="mt-1 text-sm text-slate-500">Try a different search or clear a filter.</p>
+      </div>
+    )
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200">
+    <div className="panel overflow-x-auto">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="bg-slate-50">
+        <thead className="bg-slate-50/80">
           <tr>
             {columns.map((col) => (
-              <th key={col.name} className="whitespace-nowrap px-3 py-2 text-left font-semibold text-slate-600">
-                {col.name}
+              <th
+                key={col.name}
+                scope="col"
+                title={col.name}
+                className={`whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600 ${isNumeric(col) ? 'text-right' : 'text-left'}`}
+              >
+                {formatLabel(col.name)}
               </th>
             ))}
           </tr>
@@ -63,14 +76,16 @@ export function EntityTable({
               <tr
                 key={record.id}
                 onClick={() => onSelect(record)}
-                className={`cursor-pointer ${lowStock ? 'bg-red-50/70 hover:bg-red-50' : 'hover:bg-slate-50'}`}
+                tabIndex={0}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onSelect(record))}
+                className={`cursor-pointer transition-colors focus:bg-indigo-50/60 focus:outline-none ${lowStock ? 'bg-red-50/70 hover:bg-red-50' : 'hover:bg-slate-50'}`}
               >
                 {columns.map((col) => {
                   const value = record.data[col.name]
                   if (col.name === entity.status_column && value) {
                     const strValue = formatCellValue(value)
                     return (
-                      <td key={col.name} className="whitespace-nowrap px-3 py-2">
+                      <td key={col.name} className="whitespace-nowrap px-4 py-3">
                         <StatusBadge value={strValue} isRisk={riskByStatus.get(strValue)} />
                       </td>
                     )
@@ -83,9 +98,9 @@ export function EntityTable({
                   return (
                     <td
                       key={col.name}
-                      className={`whitespace-nowrap px-3 py-2 ${isQuantityCell ? 'font-semibold text-red-700' : 'text-slate-700'}`}
+                      className={`whitespace-nowrap px-4 py-3 ${isNumeric(col) ? 'text-right tabular-nums' : ''} ${isQuantityCell ? 'font-semibold text-red-700' : col.name === entity.title_column ? 'font-medium text-slate-900' : 'text-slate-700'}`}
                     >
-                      <span className="flex items-center gap-1.5">
+                      <span className={`inline-flex items-center gap-1.5 ${isNumeric(col) ? 'justify-end' : ''}`}>
                         {formatted || <span className="text-slate-300">—</span>}
                         {lowStock && col.name === entity.title_column && (
                           <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">

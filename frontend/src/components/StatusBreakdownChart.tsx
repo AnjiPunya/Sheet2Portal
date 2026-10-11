@@ -16,7 +16,7 @@ export function StatusBreakdownChart({ items, max = 6 }: { items: StatusBreakdow
     <div className="flex flex-col gap-2.5">
       {shown.map((item) => (
         <div key={item.value} className="flex items-center gap-3">
-          <span className="w-36 flex-shrink-0 truncate text-sm text-slate-600" title={item.value}>
+          <span className="w-28 flex-shrink-0 truncate text-sm text-slate-600 sm:w-36" title={item.value}>
             {item.value}
           </span>
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
@@ -28,7 +28,7 @@ export function StatusBreakdownChart({ items, max = 6 }: { items: StatusBreakdow
               }}
             />
           </div>
-          <span className="w-8 flex-shrink-0 text-right text-sm font-medium text-slate-700">{item.count}</span>
+          <span className="w-8 flex-shrink-0 text-right text-sm font-medium text-slate-800 tabular-nums">{item.count}</span>
         </div>
       ))}
     </div>

@@ -14,3 +14,13 @@ export async function fetchWorkbook(id: string): Promise<WorkbookOut> {
   if (!res.ok) return throwApiError(res)
   return res.json()
 }
+
+export async function updateWorkbookTitle(id: string, title: string): Promise<WorkbookOut> {
+  const res = await fetch(`${API_BASE_URL}/api/workbooks/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) return throwApiError(res)
+  return res.json()
+}

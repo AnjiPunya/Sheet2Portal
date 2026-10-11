@@ -1,6 +1,7 @@
 import type { ColumnProfile, EntityConfig, RecordItem } from '../types/portal'
 import { StatusBadge } from './StatusBadge'
 import { formatCellValue } from '../lib/format'
+import { formatLabel } from '../lib/labels'
 import { isLowStock } from '../lib/lowStock'
 
 const DETAIL_ROLE_PRIORITY = [
@@ -51,7 +52,12 @@ export function EntityCards({
   const riskByStatus = new Map(entity.status_breakdown.map((s) => [s.value, s.is_risk]))
 
   if (records.length === 0) {
-    return <p className="py-8 text-center text-sm text-slate-400">No records match the current filters.</p>
+    return (
+      <div className="panel px-6 py-12 text-center">
+        <p className="text-sm font-medium text-slate-700">No records match the current filters</p>
+        <p className="mt-1 text-sm text-slate-500">Try a different search or clear a filter.</p>
+      </div>
+    )
   }
 
   return (
@@ -64,11 +70,11 @@ export function EntityCards({
           <button
             key={record.id}
             onClick={() => onSelect(record)}
-            className={`flex flex-col gap-2 rounded-xl border p-4 text-left shadow-sm transition-shadow hover:shadow-md
-              ${lowStock ? 'border-red-200 bg-red-50/60' : 'border-slate-200 bg-white'}`}
+            className={`flex flex-col gap-3 rounded-xl border p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition hover:-translate-y-px hover:border-slate-300 hover:shadow-md
+              ${lowStock ? 'border-red-200 bg-red-50/60' : 'border-slate-200/80 bg-white'}`}
           >
             <div className="flex items-start justify-between gap-2">
-              <span className="font-medium text-slate-800">{title || 'Untitled'}</span>
+              <span className="font-semibold leading-snug text-slate-900">{title || 'Untitled'}</span>
               <div className="flex flex-shrink-0 items-center gap-1.5">
                 {lowStock && (
                   <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
@@ -78,18 +84,18 @@ export function EntityCards({
                 {statusValue && <StatusBadge value={statusValue} isRisk={riskByStatus.get(statusValue)} />}
               </div>
             </div>
-            <div className="flex flex-col gap-1 text-sm">
+            <dl className="flex flex-col gap-1.5 border-t border-slate-100 pt-3 text-sm">
               {detailColumns.map((col) => {
                 const value = formatCellValue(record.data[col.name])
                 if (!value) return null
                 return (
-                  <div key={col.name} className="flex justify-between gap-2">
-                    <span className="text-slate-400">{col.name}</span>
-                    <span className="text-slate-700">{value}</span>
+                  <div key={col.name} className="flex justify-between gap-3">
+                    <dt className="text-slate-500">{formatLabel(col.name)}</dt>
+                    <dd className="text-right font-medium text-slate-800 tabular-nums">{value}</dd>
                   </div>
                 )
               })}
-            </div>
+            </dl>
           </button>
         )
       })}

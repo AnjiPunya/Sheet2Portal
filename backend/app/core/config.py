@@ -1,8 +1,9 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     database_url: str = "postgresql+psycopg://sheet2portal:sheet2portal@localhost:5433/sheet2portal"
     upload_dir: str = "./uploads"
@@ -10,7 +11,21 @@ class Settings(BaseSettings):
     max_rows_per_sheet: int = 50_000
     sample_row_count: int = 20
     allowed_extensions: tuple[str, ...] = (".xlsx", ".csv")
-    llm_provider: str = "none"
+
+    # Chatbot: AI is used exclusively here -- parsing/analysis/KPIs stay
+    # deterministic. Names match the existing Vedha/Orka project's Render
+    # env vars so those credentials can be reused as-is on a shared service.
+    chatbot_provider: str = "groq"  # which configured provider is used by default
+    groq_api_key: str = ""
+    # Vedha reads GEMINI_API_KEY_1 first, then GEMINI_API_KEY -- accept both.
+    gemini_api_key: str = Field(default="", validation_alias=AliasChoices("GEMINI_API_KEY_1", "GEMINI_API_KEY"))
+    openrouter_api_key: str = ""
+    cerebras_api_key: str = ""
+    chatbot_model: str = ""  # optional override; blank = provider's built-in default
+    chat_request_timeout_seconds: float = 20.0
+    chat_max_history_messages: int = 20
+    chat_max_tool_iterations: int = 4
+    chat_tool_max_page_size: int = 50
 
 
 settings = Settings()

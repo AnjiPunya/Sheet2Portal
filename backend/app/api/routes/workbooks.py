@@ -11,7 +11,7 @@ from app.models.column import Column
 from app.models.record import Record
 from app.models.workbook import Workbook, WorkbookStatus
 from app.models.worksheet import Worksheet
-from app.schemas.workbook import WorkbookOut
+from app.schemas.workbook import WorkbookOut, WorkbookTitleUpdate
 from app.services.parsing.service import extension_of, parse_workbook
 from app.services.parsing.types import ParsingError
 from app.services.storage.local import LocalStorageBackend
@@ -128,4 +128,18 @@ def get_workbook(
     db: Session = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> Workbook:
+    return _load_workbook(db, workbook_id, tenant_id)
+
+
+@router.patch("/{workbook_id}", response_model=WorkbookOut)
+def update_workbook(
+    workbook_id: uuid.UUID,
+    payload: WorkbookTitleUpdate,
+    db: Session = Depends(get_db),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+) -> Workbook:
+    workbook = _load_workbook(db, workbook_id, tenant_id)
+    title = payload.title.strip() if payload.title is not None else None
+    workbook.display_title = title or None  # blank -> reset to the generated default
+    db.commit()
     return _load_workbook(db, workbook_id, tenant_id)
