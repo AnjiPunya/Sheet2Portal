@@ -95,6 +95,9 @@ class EntityConfig:
     status_breakdown: list[StatusBreakdownItem] = field(default_factory=list)
     kpis: list[KPIDefinition] = field(default_factory=list)
     low_stock_strategy: LowStockStrategy | None = None
+    # Documentation sheet (README, Data Dictionary, KPI definitions...):
+    # read-only, never totalled, charted or alerted on.
+    reference: bool = False
 
 
 @dataclass
@@ -124,3 +127,8 @@ class PortalConfig:
     alerts: list[KPIDefinition] = field(default_factory=list)
     relationships: list[RelationshipCandidate] = field(default_factory=list)
     primary_entity: str | None = None
+    # Business domain ("construction", "aquaculture", ... or "generic"), used
+    # only to theme the portal (dashboard banner); never affects calculations.
+    domain: str = "generic"
+    # Dashboard charts chosen from the data (see analysis/charts.py).
+    charts: list[dict] = field(default_factory=list)

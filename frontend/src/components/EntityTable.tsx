@@ -1,6 +1,6 @@
 import type { ColumnProfile, EntityConfig, RecordItem } from '../types/portal'
 import { StatusBadge } from './StatusBadge'
-import { formatCellValue } from '../lib/format'
+import { formatCellValue, formatFieldValue } from '../lib/format'
 import { formatLabel } from '../lib/labels'
 import { isLowStock } from '../lib/lowStock'
 
@@ -90,7 +90,7 @@ export function EntityTable({
                       </td>
                     )
                   }
-                  const formatted = formatCellValue(value)
+                  const formatted = formatFieldValue(value, col.role)
                   const isQuantityCell =
                     lowStock &&
                     (col.name === entity.low_stock_strategy?.quantity_column ||
@@ -101,7 +101,15 @@ export function EntityTable({
                       className={`whitespace-nowrap px-4 py-3 ${isNumeric(col) ? 'text-right tabular-nums' : ''} ${isQuantityCell ? 'font-semibold text-red-700' : col.name === entity.title_column ? 'font-medium text-slate-900' : 'text-slate-700'}`}
                     >
                       <span className={`inline-flex items-center gap-1.5 ${isNumeric(col) ? 'justify-end' : ''}`}>
-                        {formatted || <span className="text-slate-300">—</span>}
+                        {record.display?.[col.name] ? (
+                          // Reference: the related record's name, with its ID kept for identification.
+                          <span className="flex flex-col leading-tight">
+                            <span className="text-slate-800">{record.display[col.name]}</span>
+                            <span className="text-[11px] text-slate-400">{formatted}</span>
+                          </span>
+                        ) : (
+                          formatted || <span className="text-slate-300">—</span>
+                        )}
                         {lowStock && col.name === entity.title_column && (
                           <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
                             Low stock

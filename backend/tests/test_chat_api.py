@@ -154,22 +154,21 @@ def test_chat_404_for_unknown_workbook(client, monkeypatch):
     assert response.status_code == 404
 
 
-def test_chat_cannot_access_another_tenants_workbook(client, multi_sheet_xlsx, monkeypatch):
+def test_chat_cannot_access_another_tenants_workbook(client, make_client, multi_sheet_xlsx, monkeypatch):
     with open(multi_sheet_xlsx, "rb") as f:
         upload = client.post(
             "/api/workbooks",
             files={"file": ("workbook.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-            headers={"X-Tenant-Id": "tenant-a"},
         )
     workbook_id = upload.json()["id"]
+    other_user = make_client("other@example.com")
 
     provider = ScriptedProvider([ChatResult(message=ChatMessage(role="assistant", content="hi"), finish_reason="stop")])
     _patch_provider(monkeypatch, provider)
 
-    response = client.post(
+    response = other_user.post(
         f"/api/workbooks/{workbook_id}/chat",
         json={"messages": [{"role": "user", "content": "hi"}]},
-        headers={"X-Tenant-Id": "tenant-b"},
     )
     assert response.status_code == 404
 

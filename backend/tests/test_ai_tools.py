@@ -187,3 +187,50 @@ def test_unknown_tool_name_rejected(ctx):
 def test_tool_args_must_be_object(ctx):
     with pytest.raises(ToolValidationError, match="JSON object"):
         execute_tool("list_entities", "not a dict", ctx, MAX_PAGE_SIZE)  # type: ignore[arg-type]
+
+
+# Groq validates tool-call arguments against these schemas on its side, and
+# models often send optional arguments as explicit nulls.
+
+
+def test_count_with_null_field_counts_rows(ctx):
+    result = execute_tool("aggregate", {"worksheet": "Projects", "operation": "count", "field": None}, ctx, MAX_PAGE_SIZE)
+    assert result["value"] == 3
+
+
+def test_count_with_null_field_and_null_filters(ctx):
+    result = execute_tool(
+        "aggregate", {"worksheet": "Projects", "operation": "count", "field": None, "filters": None}, ctx, MAX_PAGE_SIZE
+    )
+    assert result["value"] == 3
+
+
+def test_sum_with_null_field_is_a_validation_error(ctx):
+    with pytest.raises(ToolValidationError, match="'field' is required"):
+        execute_tool("aggregate", {"worksheet": "Projects", "operation": "sum", "field": None}, ctx, MAX_PAGE_SIZE)
+
+
+def test_list_records_accepts_null_optional_arguments(ctx):
+    result = execute_tool(
+        "list_records",
+        {"worksheet": "Projects", "search": None, "filters": None, "page": None, "page_size": None},
+        ctx,
+        MAX_PAGE_SIZE,
+    )
+    assert result["total"] == 3
+    assert result["page"] == 1
+
+
+def test_optional_tool_arguments_allow_null_in_schema():
+    from app.services.ai.tools import TOOL_SPECS
+
+    def allows_null(prop: dict) -> bool:
+        types = prop.get("type")
+        return types == "null" or (isinstance(types, list) and "null" in types)
+
+    for spec in TOOL_SPECS:
+        properties = spec.parameters.get("properties", {})
+        required = set(spec.parameters.get("required", []))
+        for name, prop in properties.items():
+            if name not in required:
+                assert allows_null(prop), f"{spec.name}.{name} is optional but rejects null"

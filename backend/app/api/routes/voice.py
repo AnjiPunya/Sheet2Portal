@@ -19,11 +19,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_tenant_id
+from app.api.deps import get_current_tenant_id, get_current_user
 from app.api.routes.chat import _ensure_ready, _load_chat_context
 from app.api.routes.portal import _error, _load_workbook_for_portal
 from app.core.config import settings
 from app.core.db import get_db
+from app.models.user import User
 from app.schemas.chat import ChatMessageIn
 from app.schemas.voice import (
     LanguageModeIn,
@@ -35,6 +36,7 @@ from app.schemas.voice import (
     VoiceRespondRequest,
     VoiceTurnOut,
 )
+from app.services.actions.session import ActionSession, PendingRef
 from app.services.ai.base import (
     ChatMessage,
     ProviderError,
@@ -50,7 +52,7 @@ from app.services.voice import stt, tts
 from app.services.voice.audio import AudioValidationError, validate_audio, wav_duration_seconds
 from app.services.voice.http import ProviderRejectedAudio
 from app.services.voice.language import LANGUAGE_MODES, classify_transcript
-from app.services.voice.service import reply_language, run_voice_reply, speech_payload, workbook_vocabulary
+from app.services.voice.service import fixed_voice_reply, reply_language, run_voice_reply, speech_payload, workbook_vocabulary
 from app.services.voice.settings import voice_settings
 from app.services.voice.speakable import to_speakable
 
@@ -96,13 +98,17 @@ def _require_enabled() -> None:
         raise _error(503, "VOICE_DISABLED", "Voice assistant is disabled on this server.")
 
 
-def _load_ctx(db: Session, workbook_id: uuid.UUID, tenant_id: uuid.UUID) -> ChatContext:
+def _load_workbook_ctx(db: Session, workbook_id: uuid.UUID, tenant_id: uuid.UUID):
     workbook = _load_workbook_for_portal(db, workbook_id, tenant_id)
     _ensure_ready(workbook)
     ctx = _load_chat_context(db, workbook)
     if not ctx.config.entities:
         raise _error(422, "NO_USABLE_WORKSHEETS", "This workbook has no usable data for the chatbot to query.")
-    return ctx
+    return workbook, ctx
+
+
+def _load_ctx(db: Session, workbook_id: uuid.UUID, tenant_id: uuid.UUID) -> ChatContext:
+    return _load_workbook_ctx(db, workbook_id, tenant_id)[1]
 
 
 async def _read_audio(audio: UploadFile, duration_ms: int | None):
@@ -133,14 +139,32 @@ async def _transcribe(clip, mode: str, ctx: ChatContext) -> stt.Transcription:
     return result
 
 
-async def _reply(ctx: ChatContext, messages: list[ChatMessageIn], mode: str, want_tts: bool, requested_provider: str | None, stt_language: str | None = None):
+async def _reply(
+    ctx: ChatContext,
+    messages: list[ChatMessageIn],
+    mode: str,
+    want_tts: bool,
+    requested_provider: str | None,
+    stt_language: str | None = None,
+    actions: ActionSession | None = None,
+):
+    history = [ChatMessage(role=m.role, content=m.content) for m in messages][-settings.chat_max_history_messages :]
+    language = reply_language(history, mode, stt_language)
+    want_tts = want_tts and tts.server_tts_available(settings, voice_settings)
+    if actions is not None:
+        # Same draft -> confirm -> execute flow as /chat: a plain spoken
+        # "yes" / "అవును" to the draft on screen confirms it without the model.
+        actions.language_hint = language
+        fixed = actions.resolve_utterance(messages[-1].content)
+        if fixed is not None:
+            reply = await fixed_voice_reply(fixed, language, settings, voice_settings, want_tts)
+            reply.action = actions.state
+            return reply
+
     try:
         provider = get_provider(settings, requested=requested_provider)
     except ProviderNotConfigured as exc:
         raise _error(503, "CHATBOT_NOT_CONFIGURED", str(exc)) from exc
-
-    history = [ChatMessage(role=m.role, content=m.content) for m in messages][-settings.chat_max_history_messages :]
-    language = reply_language(history, mode, stt_language)
     try:
         return await run_voice_reply(
             provider,
@@ -149,8 +173,9 @@ async def _reply(ctx: ChatContext, messages: list[ChatMessageIn], mode: str, wan
             language,
             settings,
             voice_settings,
-            want_tts and tts.server_tts_available(settings, voice_settings),
+            want_tts,
             fallbacks=fallback_providers(provider.name),
+            actions=actions,
         )
     except ProviderError as exc:
         raise _provider_http_error(exc, "The AI assistant") from exc
@@ -168,7 +193,7 @@ def _parse_history(raw: str | None) -> list[ChatMessageIn]:
     return history
 
 
-@router.get("/api/voice/capabilities", response_model=VoiceCapabilitiesOut)
+@router.get("/api/voice/capabilities", response_model=VoiceCapabilitiesOut, dependencies=[Depends(get_current_user)])
 def capabilities() -> VoiceCapabilitiesOut:
     chain = stt.stt_chain(settings, voice_settings)
     return VoiceCapabilitiesOut(
@@ -209,13 +234,17 @@ async def respond(
     workbook_id: uuid.UUID,
     payload: VoiceRespondRequest,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+    user: User = Depends(get_current_user),
 ) -> VoiceReplyOut:
     _require_enabled()
-    ctx = _load_ctx(db, workbook_id, tenant_id)
+    workbook, ctx = _load_workbook_ctx(db, workbook_id, user.tenant_id)
     if payload.messages[-1].role != "user":
         raise _error(422, "INVALID_HISTORY", "The last message must be the user's transcript.")
-    reply = await _reply(ctx, payload.messages, payload.language_mode, payload.tts, payload.provider)
+    pending = PendingRef(payload.pending_action.draft_id, payload.pending_action.token) if payload.pending_action else None
+    actions = ActionSession(db, user, workbook, ctx, payload.conversation_id, pending)
+    reply = await _reply(ctx, payload.messages, payload.language_mode, payload.tts, payload.provider, actions=actions)
+    if reply.action is None and actions.state:
+        reply.action = actions.state
     return VoiceReplyOut(**reply.__dict__)
 
 

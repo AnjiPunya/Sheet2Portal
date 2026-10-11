@@ -5,6 +5,8 @@ import base64
 import re
 from dataclasses import dataclass
 
+from typing import TYPE_CHECKING
+
 from app.core.config import Settings
 from app.services.ai.base import ChatMessage, LLMProvider, ProviderError, ProviderRateLimited, ProviderUnavailable
 from app.services.ai.orchestrator import extract_references, run_chat_turn
@@ -21,6 +23,9 @@ from app.services.voice.language import (
 from app.services.voice.settings import VoiceSettings
 from app.services.voice.speakable import to_speakable
 from app.services.voice.style import VoiceStyleProvider
+
+if TYPE_CHECKING:
+    from app.services.actions.session import ActionSession
 
 FALLBACK_REPLY = {
     "te": "క్షమించండి, సమాధానం ఇవ్వలేకపోయాను. దయచేసి మళ్ళీ అడగండి.",
@@ -40,6 +45,7 @@ class VoiceReply:
     provider: str
     audio: dict | None = None
     tts_error: str | None = None
+    action: dict | None = None
 
 
 def workbook_vocabulary(config: PortalConfig, limit: int = 40) -> list[str]:
@@ -129,6 +135,7 @@ async def run_voice_reply(
     voice: VoiceSettings,
     want_tts: bool,
     fallbacks: list[LLMProvider] | None = None,
+    actions: "ActionSession | None" = None,
 ) -> VoiceReply:
     """Run one chat turn through the *unchanged* orchestrator, styled for voice.
 
@@ -150,6 +157,8 @@ async def run_voice_reply(
                 ctx,
                 max_iterations=settings.chat_max_tool_iterations,
                 max_page_size=settings.chat_tool_max_page_size,
+                extra_tools=actions.tools() if actions else None,
+                system_suffix=actions.system_suffix() if actions else None,
             )
             provider = candidate
             break
@@ -165,13 +174,33 @@ async def run_voice_reply(
         speakable=speakable,
         language=language,
         voice_lang=browser_voice_lang(language),
-        references=extract_references(tool_log),
+        references=extract_references(tool_log, ctx=ctx),
         tool_calls=[{"name": e["name"], "arguments": e["arguments"]} for e in tool_log],
         provider=provider.name,
     )
+    return await _with_audio(reply, settings, voice, want_tts)
+
+
+async def _with_audio(reply: VoiceReply, settings: Settings, voice: VoiceSettings, want_tts: bool) -> VoiceReply:
     if want_tts:
         try:
-            reply.audio = await speech_payload(speakable, settings, voice)
+            reply.audio = await speech_payload(reply.speakable, settings, voice)
         except ProviderError as exc:
             reply.tts_error = str(exc)
     return reply
+
+
+async def fixed_voice_reply(
+    message: str, language: DetectedLanguage, settings: Settings, voice: VoiceSettings, want_tts: bool
+) -> VoiceReply:
+    """A reply the server decided itself (e.g. a confirmed action's outcome) -- no model call."""
+    reply = VoiceReply(
+        message=message,
+        speakable=to_speakable(message, voice.speakable_max_chars) or message,
+        language=language,
+        voice_lang=browser_voice_lang(language),
+        references=[],
+        tool_calls=[],
+        provider="actions",
+    )
+    return await _with_audio(reply, settings, voice, want_tts)

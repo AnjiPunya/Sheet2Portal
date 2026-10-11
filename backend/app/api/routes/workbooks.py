@@ -4,14 +4,15 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_tenant_id
+from app.api.deps import get_current_tenant_id, require_permission
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.column import Column
 from app.models.record import Record
 from app.models.workbook import Workbook, WorkbookStatus
 from app.models.worksheet import Worksheet
-from app.schemas.workbook import WorkbookOut, WorkbookTitleUpdate
+from app.schemas.workbook import WorkbookOut, WorkbookSummaryOut, WorkbookTitleUpdate
+from app.services.auth.permissions import Permission
 from app.services.parsing.service import extension_of, parse_workbook
 from app.services.parsing.types import ParsingError
 from app.services.storage.local import LocalStorageBackend
@@ -37,7 +38,7 @@ def _load_workbook(db: Session, workbook_id: uuid.UUID, tenant_id: uuid.UUID) ->
     return workbook
 
 
-@router.post("", response_model=WorkbookOut, status_code=201)
+@router.post("", response_model=WorkbookOut, status_code=201, dependencies=[Depends(require_permission(Permission.UPLOAD))])
 async def create_workbook(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -122,6 +123,15 @@ async def create_workbook(
     return _load_workbook(db, workbook_id, tenant_id)
 
 
+@router.get("", response_model=list[WorkbookSummaryOut])
+def list_workbooks(
+    db: Session = Depends(get_db),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+) -> list[Workbook]:
+    """The signed-in user's workbooks, newest first."""
+    return db.query(Workbook).filter(Workbook.tenant_id == tenant_id).order_by(Workbook.created_at.desc()).all()
+
+
 @router.get("/{workbook_id}", response_model=WorkbookOut)
 def get_workbook(
     workbook_id: uuid.UUID,
@@ -131,7 +141,9 @@ def get_workbook(
     return _load_workbook(db, workbook_id, tenant_id)
 
 
-@router.patch("/{workbook_id}", response_model=WorkbookOut)
+@router.patch(
+    "/{workbook_id}", response_model=WorkbookOut, dependencies=[Depends(require_permission(Permission.EDIT_WORKBOOK))]
+)
 def update_workbook(
     workbook_id: uuid.UUID,
     payload: WorkbookTitleUpdate,

@@ -65,17 +65,13 @@ def test_upload_corrupt_xlsx_stores_error_status(client, tmp_path):
     assert body["error_code"] == "CORRUPT_FILE"
 
 
-def test_upload_is_isolated_per_tenant(client, simple_csv):
+def test_upload_is_isolated_per_tenant(client, make_client, simple_csv):
     with open(simple_csv, "rb") as f:
-        upload = client.post(
-            "/api/workbooks",
-            files={"file": ("data.csv", f, "text/csv")},
-            headers={"X-Tenant-Id": "tenant-a"},
-        )
+        upload = client.post("/api/workbooks", files={"file": ("data.csv", f, "text/csv")})
     workbook_id = upload.json()["id"]
 
-    same_tenant = client.get(f"/api/workbooks/{workbook_id}", headers={"X-Tenant-Id": "tenant-a"})
+    same_tenant = client.get(f"/api/workbooks/{workbook_id}")
     assert same_tenant.status_code == 200
 
-    other_tenant = client.get(f"/api/workbooks/{workbook_id}", headers={"X-Tenant-Id": "tenant-b"})
+    other_tenant = make_client("other@example.com").get(f"/api/workbooks/{workbook_id}")
     assert other_tenant.status_code == 404

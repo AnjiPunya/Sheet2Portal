@@ -1,14 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { sendChatMessage, fetchChatSuggestions } from '../api/chat'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { cancelAction, confirmAction } from '../api/actions'
+import { sendChatMessage, fetchChatSuggestions, type ActionContext } from '../api/chat'
 import { ApiRequestError } from '../api/client'
+import { changedData, nextActionState, pendingFrom } from '../lib/actionState'
+import { invalidateWorkbookData } from '../lib/invalidate'
+import type { ActionResult, ActionState } from '../types/actions'
 import type { ChatMessage, ChatReference } from '../types/chat'
+import { ActionDraftCard } from './ActionDraftCard'
 import { ChatMarkdown } from './ChatMarkdown'
-import { usePortalNav } from './portalContext'
+import { ChatReferences } from './ChatReferences'
 import { VoiceAssistant } from './VoiceAssistant'
 
 interface DisplayMessage extends ChatMessage {
   references?: ChatReference[]
+}
+
+function newConversationId(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  }
 }
 
 export function ChatWidget({
@@ -18,11 +31,21 @@ export function ChatWidget({
   workbookId: string
   portalTitle: string
 }) {
-  const nav = usePortalNav()
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
+  // Business actions: one conversation id per chat thread (drafts are scoped
+  // to it server-side) and the draft currently on screen.
+  const [conversationId, setConversationId] = useState(newConversationId)
+  const [action, setAction] = useState<ActionState | null>(null)
+  const actionContext: ActionContext = { conversationId, pendingAction: pendingFrom(action) }
+
+  function applyAction(incoming: ActionState | null | undefined) {
+    setAction((prev) => nextActionState(prev, incoming))
+    if (changedData(incoming)) invalidateWorkbookData(queryClient, workbookId)
+  }
 
   const suggestionsQuery = useQuery({
     queryKey: ['chat-suggestions', workbookId],
@@ -32,15 +55,27 @@ export function ChatWidget({
   })
 
   const sendMutation = useMutation({
-    mutationFn: (history: ChatMessage[]) => sendChatMessage(workbookId, history),
+    mutationFn: ({ history, context }: { history: ChatMessage[]; context: ActionContext }) => sendChatMessage(workbookId, history, context),
     onSuccess: (response) => {
       setMessages((prev) => [...prev, { role: 'assistant', content: response.message, references: response.references }])
+      applyAction(response.action)
+    },
+  })
+
+  const decideMutation = useMutation({
+    mutationFn: ({ decision, draft }: { decision: 'confirm' | 'cancel'; draft: ActionState }): Promise<ActionResult> =>
+      decision === 'confirm'
+        ? confirmAction(workbookId, draft.draft_id!, draft.token!, conversationId)
+        : cancelAction(workbookId, draft.draft_id!, conversationId),
+    onSuccess: (result) => {
+      setMessages((prev) => [...prev, { role: 'assistant', content: result.message }])
+      applyAction(result.action)
     },
   })
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, sendMutation.isPending])
+  }, [messages, sendMutation.isPending, action])
 
   function ask(question: string) {
     const trimmed = question.trim()
@@ -48,15 +83,19 @@ export function ChatWidget({
     const next: DisplayMessage[] = [...messages, { role: 'user', content: trimmed }]
     setMessages(next)
     setInput('')
-    sendMutation.mutate(next.map(({ role, content }) => ({ role, content })))
+    sendMutation.mutate({ history: next.map(({ role, content }) => ({ role, content })), context: actionContext })
   }
 
   function newConversation() {
     setMessages([])
     sendMutation.reset()
+    decideMutation.reset()
+    setAction(null)
+    setConversationId(newConversationId())
   }
 
-  const error = sendMutation.error instanceof ApiRequestError ? sendMutation.error : null
+  const failure = sendMutation.error ?? decideMutation.error
+  const error = failure instanceof ApiRequestError ? failure : null
 
   return (
     <>
@@ -129,25 +168,20 @@ export function ChatWidget({
                   }`}
                 >
                   {m.role === 'assistant' ? <ChatMarkdown text={m.content} /> : m.content}
-                  {m.references && m.references.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-200 pt-2">
-                      {m.references.map((ref) => (
-                        <button
-                          key={`${ref.worksheet}-${ref.record_id}`}
-                          onClick={() => {
-                            nav.openEntity(ref.worksheet)
-                            setIsOpen(false)
-                          }}
-                          className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-600 ring-1 ring-indigo-200 hover:bg-indigo-50"
-                        >
-                          {nav.labelFor(ref.worksheet)} #{ref.record_id.slice(0, 6)}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {m.references && m.references.length > 0 && <ChatReferences references={m.references} />}
                 </div>
               </div>
             ))}
+
+            {action && (
+              <ActionDraftCard
+                action={action}
+                busy={sendMutation.isPending || decideMutation.isPending}
+                onConfirm={() => decideMutation.mutate({ decision: 'confirm', draft: action })}
+                onCancel={() => decideMutation.mutate({ decision: 'cancel', draft: action })}
+                onChoose={(candidate) => ask(candidate.label)}
+              />
+            )}
 
             {sendMutation.isPending && (
               <div className="flex justify-start">
@@ -165,7 +199,9 @@ export function ChatWidget({
           <VoiceAssistant
             workbookId={workbookId}
             history={messages}
-            disabled={sendMutation.isPending}
+            disabled={sendMutation.isPending || decideMutation.isPending}
+            actionContext={actionContext}
+            onAction={applyAction}
             onTranscript={(text) => setMessages((prev) => [...prev, { role: 'user', content: text }])}
             onReply={(reply) =>
               setMessages((prev) => [...prev, { role: 'assistant', content: reply.message, references: reply.references }])

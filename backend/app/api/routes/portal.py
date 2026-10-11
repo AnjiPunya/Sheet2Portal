@@ -15,7 +15,10 @@ from app.services.analysis.engine import build_portal_config
 from app.services.analysis.loader import load_sheet_data
 from app.services.analysis.relationships import related_rows_for
 from app.services.analysis.title import generate_portal_title
-from app.services.analysis.types import IdentifiedRow, PortalConfig
+from app.services.records.display import display_labels
+from app.services.records.links import norm
+from app.services.records.schema import build_context
+from app.services.analysis.types import IdentifiedRow, PortalConfig, SheetData
 
 router = APIRouter(prefix="/api/workbooks", tags=["portal"])
 
@@ -36,11 +39,15 @@ def _load_workbook_for_portal(db: Session, workbook_id: uuid.UUID, tenant_id: uu
     return workbook
 
 
-def _build_config(db: Session, workbook: Workbook) -> PortalConfig:
+def _load_portal(db: Session, workbook: Workbook) -> tuple[PortalConfig, list[SheetData]]:
     backfill_missing_records(db, workbook, storage)
     sheets = load_sheet_data(db, workbook)
     title = workbook.display_title or generate_portal_title(workbook.original_filename)
-    return build_portal_config(title, sheets)
+    return build_portal_config(title, sheets), sheets
+
+
+def _build_config(db: Session, workbook: Workbook) -> PortalConfig:
+    return _load_portal(db, workbook)[0]
 
 
 @router.get("/{workbook_id}/portal", response_model=PortalConfigOut)
@@ -79,17 +86,24 @@ def _filter_related(
     records: list[Record],
     related_worksheet: str | None,
     related_record_id: uuid.UUID | None,
+    value_links: list | None = None,
 ) -> list[Record]:
     """Keep only ``records`` related to one parent record (the record-detail
-    "View all" link), using the same detected relationships and matching as
-    the record-detail endpoint -- never a client-supplied column."""
+    "View all" link and chat "View Tasks" actions), using the detected
+    relationships -- or a detected value link such as Feed_Logs.Feed_Item_ID
+    -> Feed_Inventory -- never a client-supplied column."""
     if not related_worksheet or related_record_id is None:
         raise _error(422, "INVALID_RELATED_FILTER", "related_worksheet and related_record_id must be given together")
 
     linked = any(
         {rel.from_entity, rel.to_entity} == {worksheet_name, related_worksheet} for rel in config.relationships
     )
-    if not linked:
+    pair = {worksheet_name, related_worksheet}
+    value_link = next(
+        (link for link in value_links or [] if link.source == "values" and {link.entity, link.target} == pair),
+        None,
+    )
+    if not linked and value_link is None:
         raise _error(
             422,
             "NO_RELATIONSHIP",
@@ -106,6 +120,14 @@ def _filter_related(
     )
     if parent is None:
         raise _error(404, "NOT_FOUND", "Related record not found")
+
+    if not linked:
+        # Value link: match the link column against the parent's key, in either direction.
+        if value_link.entity == worksheet_name:
+            key = norm(parent.data.get(value_link.target_column))
+            return [r for r in records if key and norm(r.data.get(value_link.column)) == key]
+        key = norm(parent.data.get(value_link.column))
+        return [r for r in records if key and norm(r.data.get(value_link.target_column)) == key]
 
     rows = {worksheet_name: [IdentifiedRow(id=str(r.id), data=r.data) for r in records]}
     related_ids = {
@@ -132,13 +154,14 @@ def list_records(
 ) -> RecordPageOut:
     workbook = _load_workbook_for_portal(db, workbook_id, tenant_id)
     worksheet = _get_worksheet(workbook, worksheet_name)
-    config = _build_config(db, workbook)
+    config, sheets = _load_portal(db, workbook)
+    ctx = build_context(config, {sheet.name: sheet.rows for sheet in sheets})
     entity = next((e for e in config.entities if e.worksheet == worksheet_name), None)
 
     records = db.query(Record).filter(Record.worksheet_id == worksheet.id).order_by(Record.row_index).all()
 
     if related_worksheet is not None or related_record_id is not None:
-        records = _filter_related(db, workbook, config, worksheet_name, records, related_worksheet, related_record_id)
+        records = _filter_related(db, workbook, config, worksheet_name, records, related_worksheet, related_record_id, ctx.links)
 
     if status and entity and entity.status_column:
         records = [r for r in records if str(r.data.get(entity.status_column, "")).strip() == status]
@@ -159,7 +182,7 @@ def list_records(
     page_records = records[start : start + page_size]
 
     return RecordPageOut(
-        records=[RecordOut(id=str(r.id), data=r.data) for r in page_records],
+        records=[RecordOut(id=str(r.id), data=r.data, display=display_labels(ctx, worksheet_name, r.data)) for r in page_records],
         total=total,
         page=page,
         page_size=page_size,
@@ -182,7 +205,8 @@ def get_record_detail(
     if record is None:
         raise _error(404, "NOT_FOUND", "Record not found")
 
-    config = _build_config(db, workbook)
+    config, sheets = _load_portal(db, workbook)
+    ctx = build_context(config, {sheet.name: sheet.rows for sheet in sheets})
     all_records_by_entity: dict[str, list[IdentifiedRow]] = {
         e.worksheet: [
             IdentifiedRow(id=str(r.id), data=r.data)
@@ -196,4 +220,4 @@ def get_record_detail(
 
     related = related_rows_for(worksheet_name, record.data, config, all_records_by_entity)
 
-    return {"id": str(record.id), "data": record.data, "related": related}
+    return {"id": str(record.id), "data": record.data, "display": display_labels(ctx, worksheet_name, record.data), "related": related}

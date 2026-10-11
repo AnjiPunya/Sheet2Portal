@@ -3,6 +3,7 @@ import type { PortalConfig } from '../types/portal'
 import { entityView, navKey, type PortalView } from '../lib/portalView'
 import { usePortalNav } from './portalContext'
 import { EditableTitle } from './EditableTitle'
+import { UserMenu } from './UserMenu'
 
 interface Props {
   config: PortalConfig
@@ -50,24 +51,26 @@ export function PortalShell({ config, view, onNavigate, onReset, onUpdateTitle, 
                 className="truncate text-lg font-semibold tracking-tight text-slate-900"
               />
               <p className="text-xs text-slate-500">
-                Generated portal · {config.entities.length} {config.entities.length === 1 ? 'entity' : 'entities'}
+                Generated portal · {config.entities.filter((e) => !e.reference).length}{' '}
+                {config.entities.filter((e) => !e.reference).length === 1 ? 'entity' : 'entities'}
               </p>
             </div>
           </div>
-          <button onClick={onReset} className="btn-secondary">
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-              <path d="M9.25 13.25a.75.75 0 001.5 0V4.636l2.955 3.129a.75.75 0 001.09-1.03l-4.25-4.5a.75.75 0 00-1.09 0l-4.25 4.5a.75.75 0 101.09 1.03L9.25 4.636v8.614z" />
-              <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
-            </svg>
-            <span className="hidden sm:inline">Upload another file</span>
-            <span className="sm:hidden">Upload</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={onReset} className="btn-secondary">
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                <path d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10z" />
+              </svg>
+              My portals
+            </button>
+            <UserMenu />
+          </div>
         </div>
         <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 sm:px-4" aria-label="Portal sections">
           <NavTab active={activeKey === 'dashboard'} onClick={() => onNavigate('dashboard')}>
             Dashboard
           </NavTab>
-          {config.entities.map((entity) => (
+          {[...config.entities.filter((e) => !e.reference), ...config.entities.filter((e) => e.reference)].map((entity) => (
             <NavTab
               key={entity.worksheet}
               active={activeKey === `entity:${entity.worksheet}`}

@@ -13,6 +13,8 @@ import { WorksheetTabs } from './WorksheetTabs'
 import { SampleTable } from './SampleTable'
 import { ErrorBanner } from './ErrorBanner'
 import { ChatWidget } from './ChatWidget'
+import { RecordDetailModal } from './RecordDetailModal'
+import { ToastProvider } from './ToastProvider'
 
 export function Portal({
   workbookId,
@@ -27,6 +29,8 @@ export function Portal({
 }) {
   const [view, setView] = useState<PortalView>('dashboard')
   const [diagnosticsSheetIndex, setDiagnosticsSheetIndex] = useState(0)
+  // A record opened by id from outside an entity page (chat reference links).
+  const [openedRecord, setOpenedRecord] = useState<{ worksheet: string; id: string; label?: string } | null>(null)
   const queryClient = useQueryClient()
 
   const activeEntity = typeof view === 'object' ? config.entities.find((e) => e.worksheet === view.worksheet) : null
@@ -35,9 +39,12 @@ export function Portal({
     const byWorksheet = new Map(config.entities.map((e) => [e.worksheet, e]))
     return {
       labelFor: (worksheet) => formatLabel(byWorksheet.get(worksheet)?.label ?? worksheet),
+      singularFor: (worksheet) => formatLabel(byWorksheet.get(worksheet)?.singular_label ?? worksheet),
       titleColumnFor: (worksheet) => byWorksheet.get(worksheet)?.title_column ?? null,
+      roleFor: (worksheet, column) => byWorksheet.get(worksheet)?.columns.find((c) => c.name === column)?.role ?? null,
       openEntity: (worksheet) => setView(entityView(worksheet)),
       openRelated: (worksheet, parent) => setView(relatedEntityView(worksheet, parent)),
+      openRecord: (worksheet, id, label) => setOpenedRecord({ worksheet, id, label }),
     }
   }, [config.entities])
 
@@ -61,6 +68,7 @@ export function Portal({
 
   return (
     <PortalNavContext.Provider value={nav}>
+      <ToastProvider>
       <PortalShell
         config={config}
         view={view}
@@ -118,7 +126,19 @@ export function Portal({
         )}
 
         <ChatWidget workbookId={workbookId} portalTitle={config.title} />
+
+        {openedRecord && (
+          <RecordDetailModal
+            key={`${openedRecord.worksheet}:${openedRecord.id}`}
+            workbookId={workbookId}
+            worksheet={openedRecord.worksheet}
+            record={{ id: openedRecord.id, data: {}, display: {} }}
+            initialLabel={openedRecord.label}
+            onClose={() => setOpenedRecord(null)}
+          />
+        )}
       </PortalShell>
+      </ToastProvider>
     </PortalNavContext.Provider>
   )
 }

@@ -14,10 +14,21 @@ def _no_real_provider_keys(monkeypatch):
     """Tests must never see (or spend) real API keys from a developer's .env."""
     from app.core.config import settings
 
-    for field in ("groq_api_key", "gemini_api_key", "openrouter_api_key", "cerebras_api_key"):
+    for field in ("groq_api_key", "gemini_api_key", "gemini_api_key_2", "openrouter_api_key", "cerebras_api_key"):
         monkeypatch.setattr(settings, field, "")
     monkeypatch.setattr(settings, "chatbot_provider", "groq")
     monkeypatch.setattr(settings, "chatbot_model", "")
+
+
+@pytest.fixture(autouse=True)
+def _fast_password_hashing(monkeypatch):
+    """Cheaper scrypt in tests (the cost is stored in each hash, so verifying
+    still works). Also resets the in-memory login throttle between tests."""
+    from app.api.routes import auth as auth_route
+    from app.core import security
+
+    monkeypatch.setattr(security, "_SCRYPT_N", 2**8)
+    auth_route._failures.clear()
 
 
 @pytest.fixture
@@ -56,9 +67,54 @@ def client(tmp_path, monkeypatch):
     test_client = TestClient(app)
     test_client.test_sessionmaker = TestSessionLocal
     with test_client:
+        # Every API route requires a signed-in user; the default client is
+        # the owner of its own tenant. Use `make_client` for other users.
+        _sign_up(test_client, DEFAULT_EMAIL)
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+DEFAULT_EMAIL = "owner@example.com"
+TEST_PASSWORD = "correct-horse-1"
+
+
+def _sign_up(test_client, email, password=TEST_PASSWORD):
+    response = test_client.post("/api/auth/signup", json={"email": email, "password": password})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def make_client(client):
+    """Factory for extra signed-in clients (each its own user and tenant),
+    sharing the same test database. ``role`` changes the new user's role."""
+    from app.models.user import User
+
+    opened = []
+
+    def make(email: str, role: str | None = None) -> TestClient:
+        other = TestClient(app)
+        other.__enter__()
+        opened.append(other)
+        _sign_up(other, email)
+        if role:
+            with client.test_sessionmaker() as db:
+                db.query(User).filter(User.email == email).update({"role": role})
+                db.commit()
+        return other
+
+    yield make
+    for other in opened:
+        other.__exit__(None, None, None)
+
+
+@pytest.fixture
+def anon_client(client):
+    """A client with no session, against the same test database."""
+    other = TestClient(app)
+    with other:
+        yield other
 
 
 @pytest.fixture

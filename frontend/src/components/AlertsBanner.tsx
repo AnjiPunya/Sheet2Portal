@@ -1,5 +1,6 @@
 import type { KPIDefinition } from '../types/portal'
-import { formatLabel } from '../lib/labels'
+import { alertText } from '../lib/alerts'
+import { usePortalNav } from './portalContext'
 
 export function AlertsBanner({
   alerts,
@@ -8,17 +9,20 @@ export function AlertsBanner({
   alerts: KPIDefinition[]
   onSelectEntity: (worksheet: string) => void
 }) {
+  const nav = usePortalNav()
   if (alerts.length === 0) return null
 
   const hasCritical = alerts.some((a) => a.severity === 'critical')
+  const items = alerts.map((alert) => ({ alert, text: alertText(alert, alert.entity ? nav.labelFor(alert.entity) : null) }))
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <svg
           className={`mt-0.5 h-5 w-5 flex-shrink-0 ${hasCritical ? 'text-red-500' : 'text-amber-500'}`}
           viewBox="0 0 20 20"
           fill="currentColor"
+          aria-hidden
         >
           <path
             fillRule="evenodd"
@@ -27,21 +31,23 @@ export function AlertsBanner({
           />
         </svg>
         <div>
-          <p className="font-semibold text-slate-800">Action Required</p>
+          <p className="font-semibold text-slate-800">Action required</p>
           <p className="text-sm text-slate-600">
-            {alerts.map((a) => `${a.value} ${formatLabel(a.label).toLowerCase()}`).join(' · ')}
+            {alerts.length} {alerts.length === 1 ? 'item needs' : 'items need'} attention. Each opens the records behind it.
           </p>
         </div>
       </div>
+      {/* One button per alert, each naming its sheet -- no duplicates elsewhere on the dashboard. */}
       <div className="flex flex-wrap gap-2">
-        {alerts.map((alert) => (
+        {items.map(({ alert, text }) => (
           <button
             key={alert.key}
             onClick={() => alert.entity && onSelectEntity(alert.entity)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors
+            className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors
               ${alert.severity === 'critical' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}
           >
-            Review {formatLabel(alert.label)} ({alert.value})
+            <span>{text}</span>
+            <span className="rounded-full bg-white/25 px-1.5 text-xs font-semibold tabular-nums">{alert.value}</span>
           </button>
         ))}
       </div>

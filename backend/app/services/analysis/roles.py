@@ -9,6 +9,8 @@ should treat low-confidence roles as suggestions, not facts.
 
 import re
 
+from app.services.analysis.semantics import is_percent, is_phone, rating_max
+
 from app.services.analysis.types import ColumnProfile, FieldRole
 
 IDENTIFIER_HINTS = ("id", "code", "number", "no", "sku", "key", "ref", "reference")
@@ -44,6 +46,13 @@ def infer_role(name: str, inferred_type: str, values: list[object]) -> tuple[Fie
 
     if inferred_type == "bool":
         return FieldRole.FLAG, 0.9
+
+    # Phone numbers, percentages and ratings are numbers but never money or
+    # stock -- keep them out of every sum, budget and low-stock rule.
+    if is_phone(name):
+        return FieldRole.OTHER, 0.9
+    if inferred_type in ("int", "float") and (is_percent(name) or rating_max(name, []) is not None):
+        return FieldRole.OTHER, 0.8
 
     if _matches(normalized, DUE_DATE_HINTS) and inferred_type == "date":
         return FieldRole.DUE_DATE, 0.9

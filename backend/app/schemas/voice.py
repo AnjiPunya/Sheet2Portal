@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.actions import ActionStateOut, ConversationId, PendingActionIn
 from app.schemas.chat import ChatMessageIn, ChatReferenceOut, ChatToolCallOut
 
 LanguageModeIn = Literal["auto", "te", "en"]
@@ -42,6 +43,7 @@ class VoiceReplyOut(BaseModel):
     provider: str
     audio: SpeechAudioOut | None = None
     tts_error: str | None = None  # set when audio was requested but synthesis failed (reply text still usable)
+    action: ActionStateOut | None = None  # business-action draft / outcome (same flow as /chat)
 
 
 class VoiceRespondRequest(BaseModel):
@@ -52,6 +54,8 @@ class VoiceRespondRequest(BaseModel):
     language_mode: LanguageModeIn = "auto"
     tts: bool = False
     provider: str | None = None
+    conversation_id: ConversationId | None = None
+    pending_action: PendingActionIn | None = None
 
 
 class VoiceTurnOut(VoiceReplyOut):

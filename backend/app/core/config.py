@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     sample_row_count: int = 20
     allowed_extensions: tuple[str, ...] = (".xlsx", ".csv")
 
+    # Auth: session token in an httpOnly cookie. Set SESSION_COOKIE_SECURE=true
+    # when served over HTTPS (production) so the cookie is never sent in clear.
+    session_cookie_name: str = "s2p_session"
+    session_ttl_hours: int = 24 * 7
+    session_cookie_secure: bool = False
+    cors_origins: tuple[str, ...] = ("http://localhost:5173",)
+
     # Chatbot: AI is used exclusively here -- parsing/analysis/KPIs stay
     # deterministic. Names match the existing Vedha/Orka project's Render
     # env vars so those credentials can be reused as-is on a shared service.
@@ -19,6 +26,9 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     # Vedha reads GEMINI_API_KEY_1 first, then GEMINI_API_KEY -- accept both.
     gemini_api_key: str = Field(default="", validation_alias=AliasChoices("GEMINI_API_KEY_1", "GEMINI_API_KEY"))
+    # Optional second Gemini key (e.g. another Google project with its own
+    # free quota), tried when the first is rate limited / out of quota.
+    gemini_api_key_2: str = ""
     openrouter_api_key: str = ""
     cerebras_api_key: str = ""
     chatbot_model: str = ""  # optional override; blank = provider's built-in default

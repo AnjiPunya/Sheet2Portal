@@ -9,6 +9,7 @@ not produced -- nothing is estimated or hardcoded to fill the gap.
 import re
 from datetime import date, datetime
 
+from app.services.analysis.semantics import is_per_unit
 from app.services.analysis.text import humanize
 from app.services.analysis.types import (
     ColumnProfile,
@@ -176,6 +177,8 @@ def compute_entity_kpis(entity: EntityConfig, rows: list[dict]) -> tuple[list[KP
     for col in _columns_by_role(entity.columns, FieldRole.BUDGET_AMOUNT) + _columns_by_role(
         entity.columns, FieldRole.ACTUAL_AMOUNT
     ) + _columns_by_role(entity.columns, FieldRole.AMOUNT):
+        if is_per_unit(col.name):
+            continue  # summing unit prices / rates across rows means nothing
         values = [_numeric(row.get(col.name)) for row in rows]
         values = [v for v in values if v is not None]
         if not values:

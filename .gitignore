@@ -15,3 +15,6 @@ frontend/.env
 
 # OS
 .DS_Store
+
+# Vite dependency cache (never commit)
+.vite/

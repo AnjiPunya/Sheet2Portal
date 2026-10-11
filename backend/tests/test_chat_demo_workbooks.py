@@ -120,11 +120,13 @@ def test_construction_overdue_tasks_by_date_filter(client, monkeypatch, construc
 
 
 def test_construction_project_to_tasks_relationship(client, monkeypatch, construction_id):
-    projects, _ = _ask_tool(
+    projects, body = _ask_tool(
         client, monkeypatch, construction_id, "list_records",
         {"worksheet": "Projects", "filters": [{"field": "Project Name", "operator": "eq", "value": "Lakeview Luxury Villas"}]},
     )
-    project_id = projects["records"][0]["id"]
+    # Record ids in the answer text are shown as names; the real id is in the reference.
+    assert projects["records"][0]["id"] == "Lakeview Luxury Villas"
+    project_id = body["references"][0]["record_id"]
     related, _ = _ask_tool(
         client, monkeypatch, construction_id, "traverse_relationship", {"worksheet": "Projects", "record_id": project_id}
     )

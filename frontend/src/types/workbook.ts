@@ -25,3 +25,11 @@ export interface WorkbookOut {
   error_message: string | null
   worksheets: WorksheetOut[]
 }
+
+export interface WorkbookSummary {
+  id: string
+  original_filename: string
+  display_title: string | null
+  status: WorkbookStatus
+  created_at: string
+}

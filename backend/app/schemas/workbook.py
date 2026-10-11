@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +34,18 @@ class WorkbookOut(BaseModel):
     error_code: str | None
     error_message: str | None
     worksheets: list[WorksheetOut]
+
+
+class WorkbookSummaryOut(BaseModel):
+    """One row in the signed-in user's list of portals."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    original_filename: str
+    display_title: str | None
+    status: str
+    created_at: datetime
 
 
 class WorkbookTitleUpdate(BaseModel):

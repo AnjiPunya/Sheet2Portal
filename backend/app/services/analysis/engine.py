@@ -15,6 +15,9 @@ passes:
    corrupts status breakdowns, KPIs and the identifier pick for that sheet.
 """
 
+from app.services.analysis.charts import build_charts
+from app.services.analysis.domain import detect_domain
+from app.services.analysis.semantics import is_reference_sheet
 from app.services.analysis.kpis import compute_entity_kpis, compute_status_breakdown
 from app.services.analysis.relationships import detect_relationships
 from app.services.analysis.roles import profile_column
@@ -61,11 +64,14 @@ def _resolve_entity_picks(entity: EntityConfig) -> None:
 
 
 def _choose_primary_entity(entities: list[EntityConfig], relationships) -> str | None:
+    entities = [e for e in entities if not e.reference] or entities
     if not entities:
         return None
+    names = {e.worksheet for e in entities}
     inbound_counts: dict[str, int] = {}
     for rel in relationships:
-        inbound_counts[rel.to_entity] = inbound_counts.get(rel.to_entity, 0) + 1
+        if rel.to_entity in names:
+            inbound_counts[rel.to_entity] = inbound_counts.get(rel.to_entity, 0) + 1
     if inbound_counts:
         return max(inbound_counts.items(), key=lambda kv: kv[1])[0]
 
@@ -98,6 +104,7 @@ def build_portal_config(workbook_title: str, sheets: list[SheetData]) -> PortalC
             status_column=None,
             columns=profiled,
             row_count=len(sheet.rows),
+            reference=is_reference_sheet(sheet.name),
         )
         _resolve_entity_picks(entity)
         entities.append(entity)
@@ -139,16 +146,25 @@ def build_portal_config(workbook_title: str, sheets: list[SheetData]) -> PortalC
     all_kpis = []
     all_alerts = []
     for entity in entities:
+        if entity.reference:
+            continue  # documentation sheets get no KPIs or alerts
         kpis, alerts = compute_entity_kpis(entity, rows_by_entity[entity.worksheet])
         entity.kpis = kpis
         all_kpis.extend(kpis)
         all_alerts.extend(alerts)
 
-    return PortalConfig(
+    config = PortalConfig(
         title=workbook_title,
         entities=entities,
         kpis=all_kpis,
         alerts=all_alerts,
         relationships=relationships,
         primary_entity=_choose_primary_entity(entities, relationships),
+        domain=detect_domain(
+            workbook_title,
+            (sheet.name for sheet in sheets),
+            (name for sheet in sheets for name, _, _ in sheet.columns),
+        ),
     )
+    config.charts = build_charts(config, rows_by_entity)
+    return config

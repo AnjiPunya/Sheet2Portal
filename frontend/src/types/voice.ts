@@ -1,3 +1,4 @@
+import type { ActionState } from './actions'
 import type { ChatReference, ChatToolCall } from './chat'
 
 export type DetectedLanguage = 'te' | 'en' | 'mixed'
@@ -36,6 +37,7 @@ export interface VoiceReply {
   provider: string
   audio: SpeechAudio | null
   tts_error: string | null
+  action?: ActionState | null
 }
 
 export interface SpeakResponse {

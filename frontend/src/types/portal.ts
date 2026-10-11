@@ -52,6 +52,8 @@ export interface EntityConfig {
   status_breakdown: StatusBreakdownItem[]
   kpis: KPIDefinition[]
   low_stock_strategy: LowStockStrategy | null
+  /** Documentation sheet (README, Data Dictionary...): read-only, no KPIs. */
+  reference?: boolean
 }
 
 export interface RelationshipCandidate {
@@ -70,11 +72,17 @@ export interface PortalConfig {
   alerts: KPIDefinition[]
   relationships: RelationshipCandidate[]
   primary_entity: string | null
+  /** Detected business domain (e.g. "construction", "retail", "generic"); theming only. */
+  domain?: string
+  /** Charts chosen by the backend from the workbook's data. */
+  charts?: ChartSpec[]
 }
 
 export interface RecordItem {
   id: string
   data: Record<string, unknown>
+  /** Readable labels for reference columns, e.g. Project_ID -> "Green Meadows Apartments · Kompally". */
+  display?: Record<string, string>
 }
 
 export interface RecordPage {
@@ -93,5 +101,45 @@ export interface RelatedGroup {
 export interface RecordDetail {
   id: string
   data: Record<string, unknown>
+  display?: Record<string, string>
   related: RelatedGroup[]
 }
+
+export interface GroupedBarChart {
+  id: string
+  kind: 'grouped_bar'
+  title: string
+  entity: string
+  series: [string, string]
+  items: { label: string; values: [number, number]; flag: 'over' | null }[]
+  note: string | null
+}
+
+export interface StatusStackChart {
+  id: string
+  kind: 'status_stack'
+  title: string
+  entity: string
+  segments: { label: string; value: number; status: 'good' | 'warning' | 'critical' | 'neutral' }[]
+}
+
+export interface TimeColumnsChart {
+  id: string
+  kind: 'time_columns'
+  title: string
+  entity: string
+  unit: 'day' | 'week' | 'month' | 'quarter'
+  series: string
+  points: { period: string; value: number }[]
+  total: number
+}
+
+export interface StatusBarsChart {
+  id: string
+  kind: 'status_bars'
+  title: string
+  entity: string
+  items: { label: string; value: number; risk: boolean }[]
+}
+
+export type ChartSpec = GroupedBarChart | StatusStackChart | TimeColumnsChart | StatusBarsChart

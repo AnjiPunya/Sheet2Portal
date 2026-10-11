@@ -7,6 +7,8 @@ backs all three provider adapters instead of three near-duplicates.
 
 import asyncio
 import json
+import logging
+from collections.abc import Sequence
 
 import httpx
 
@@ -21,6 +23,8 @@ from app.services.ai.base import (
     ToolCall,
     ToolSpec,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _message_to_payload(message: ChatMessage) -> dict:
@@ -90,29 +94,48 @@ class OpenAICompatibleProvider:
         model: str,
         timeout: float = 20.0,
         max_rate_limit_wait: float = 10.0,
+        backup_api_keys: Sequence[str] = (),
     ):
         self.name = name
-        self._api_key = api_key
+        # Primary key first, then backups (e.g. a second Gemini project's key
+        # with its own free quota). Blank and duplicate keys are dropped.
+        self._api_keys = list(dict.fromkeys(k for k in (api_key, *backup_api_keys) if k))
+        # Index of the key to try first. After a rate-limited key, later calls
+        # on this instance (the rest of the same chat turn) start from the key
+        # that worked; providers are built per request, so the next request
+        # tries the primary key again.
+        self._first_key = 0
         self._base_url = base_url
         self._model = model
         self._timeout = timeout
         self._max_rate_limit_wait = max_rate_limit_wait
 
     async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> ChatResult:
-        if not self._api_key:
+        if not self._api_keys:
             raise ProviderNotConfigured(f"{self.name} is not configured (no API key)")
 
-        try:
-            return await self._chat_once(messages, tools)
-        except ProviderRateLimited as exc:
-            # Free tiers cap tokens per minute and usually ask for a wait of
-            # only a few seconds -- retry once rather than failing the turn.
-            if exc.retry_after is None or exc.retry_after > self._max_rate_limit_wait:
-                raise
-            await asyncio.sleep(exc.retry_after)
-            return await self._chat_once(messages, tools)
+        # A rate-limited/quota-exhausted key moves straight on to the next
+        # key; only when every key is limited does the caller see the error
+        # (and the route's provider fallback, e.g. to Groq, take over).
+        for index in range(self._first_key, len(self._api_keys)):
+            try:
+                result = await self._chat_once(messages, tools, self._api_keys[index])
+                self._first_key = index
+                return result
+            except ProviderRateLimited as exc:
+                limited = exc
+                if index + 1 < len(self._api_keys):
+                    # Key positions only -- never key values.
+                    logger.warning("%s API key #%d rate limited; retrying with key #%d", self.name, index + 1, index + 2)
 
-    async def _chat_once(self, messages: list[ChatMessage], tools: list[ToolSpec] | None) -> ChatResult:
+        # Free tiers cap tokens per minute and usually ask for a wait of only
+        # a few seconds -- retry once rather than failing the turn.
+        if limited.retry_after is None or limited.retry_after > self._max_rate_limit_wait:
+            raise limited
+        await asyncio.sleep(limited.retry_after)
+        return await self._chat_once(messages, tools, self._api_keys[0])
+
+    async def _chat_once(self, messages: list[ChatMessage], tools: list[ToolSpec] | None, api_key: str) -> ChatResult:
         payload: dict = {
             "model": self._model,
             "messages": [_message_to_payload(m) for m in messages],
@@ -125,7 +148,7 @@ class OpenAICompatibleProvider:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     self._base_url,
-                    headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json=payload,
                 )
         except httpx.TimeoutException as exc:

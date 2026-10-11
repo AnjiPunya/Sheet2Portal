@@ -1,6 +1,6 @@
 import type { ColumnProfile, EntityConfig, RecordItem } from '../types/portal'
 import { StatusBadge } from './StatusBadge'
-import { formatCellValue } from '../lib/format'
+import { formatCellValue, formatFieldValue } from '../lib/format'
 import { formatLabel } from '../lib/labels'
 import { isLowStock } from '../lib/lowStock'
 
@@ -86,12 +86,20 @@ export function EntityCards({
             </div>
             <dl className="flex flex-col gap-1.5 border-t border-slate-100 pt-3 text-sm">
               {detailColumns.map((col) => {
-                const value = formatCellValue(record.data[col.name])
+                const value = formatFieldValue(record.data[col.name], col.role)
                 if (!value) return null
                 return (
                   <div key={col.name} className="flex justify-between gap-3">
-                    <dt className="text-slate-500">{formatLabel(col.name)}</dt>
-                    <dd className="text-right font-medium text-slate-800 tabular-nums">{value}</dd>
+                    <dt className="shrink-0 whitespace-nowrap text-slate-500">{formatLabel(col.name)}</dt>
+                    <dd className="text-right font-medium text-slate-800 tabular-nums">
+                      {record.display?.[col.name] ? (
+                        <>
+                          {record.display[col.name]} <span className="text-xs font-normal text-slate-400">{value}</span>
+                        </>
+                      ) : (
+                        value
+                      )}
+                    </dd>
                   </div>
                 )
               })}

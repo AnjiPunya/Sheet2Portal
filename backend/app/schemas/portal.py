@@ -60,6 +60,7 @@ class EntityConfigOut(BaseModel):
     status_breakdown: list[StatusBreakdownItemOut]
     kpis: list[KPIDefinitionOut]
     low_stock_strategy: LowStockStrategyOut | None
+    reference: bool = False
 
 
 class RelationshipCandidateOut(BaseModel):
@@ -82,11 +83,15 @@ class PortalConfigOut(BaseModel):
     alerts: list[KPIDefinitionOut]
     relationships: list[RelationshipCandidateOut]
     primary_entity: str | None
+    domain: str = "generic"
+    charts: list[dict] = []
 
 
 class RecordOut(BaseModel):
     id: str
     data: dict
+    # Readable labels for reference columns (Project_ID -> "Green Meadows Apartments · Kompally").
+    display: dict[str, str] = {}
 
 
 class RecordPageOut(BaseModel):

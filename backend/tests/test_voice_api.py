@@ -14,10 +14,9 @@ from tests.voice_helpers import WEBM_AUDIO, FakeVoiceAPIs
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _upload(client, path, tenant=None):
+def _upload(client, path):
     with open(path, "rb") as f:
-        headers = {"X-Tenant-Id": tenant} if tenant else {}
-        return client.post("/api/workbooks", files={"file": ("workbook.xlsx", f, XLSX)}, headers=headers).json()["id"]
+        return client.post("/api/workbooks", files={"file": ("workbook.xlsx", f, XLSX)}).json()["id"]
 
 
 class RecordingProvider:
@@ -572,24 +571,21 @@ def test_unsupported_format_rejected(client, multi_sheet_xlsx, keys, apis):
     assert r.json()["detail"]["error_code"] == "UNSUPPORTED_AUDIO_FORMAT"
 
 
-def test_other_tenants_workbook_is_404(client, multi_sheet_xlsx, keys, apis):
-    workbook_id = _upload(client, multi_sheet_xlsx, tenant="tenant-a")
-    r = client.post(
+def test_other_tenants_workbook_is_404(client, make_client, multi_sheet_xlsx, keys, apis):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    other_user = make_client("other@example.com")
+    r = other_user.post(
         f"/api/workbooks/{workbook_id}/voice/turn",
         files={"audio": ("speech.webm", WEBM_AUDIO, "audio/webm")},
-        headers={"X-Tenant-Id": "tenant-b"},
     )
     assert r.status_code == 404
     for path in ("transcribe",):
-        r = client.post(
+        r = other_user.post(
             f"/api/workbooks/{workbook_id}/voice/{path}",
             files={"audio": ("speech.webm", WEBM_AUDIO, "audio/webm")},
-            headers={"X-Tenant-Id": "tenant-b"},
         )
         assert r.status_code == 404
-    r = client.post(
-        f"/api/workbooks/{workbook_id}/voice/speak", json={"text": "hi"}, headers={"X-Tenant-Id": "tenant-b"}
-    )
+    r = other_user.post(f"/api/workbooks/{workbook_id}/voice/speak", json={"text": "hi"})
     assert r.status_code == 404
     assert apis.requests == []  # no STT/TTS quota spent for unauthorized callers
 

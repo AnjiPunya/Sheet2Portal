@@ -31,6 +31,10 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
   const abortRef = useRef<AbortController | null>(null)
   const generationRef = useRef(0)
   const unlockedAudioRef = useRef<HTMLAudioElement | null>(null)
+  const doneRef = useRef<(() => void) | null>(null)
+  const watchdogRef = useRef<number | null>(null)
+  // Chrome garbage-collects queued utterances and then never fires onend; hold them.
+  const utterancesRef = useRef<SpeechSynthesisUtterance[]>([])
   const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
 
   useEffect(() => {
@@ -42,6 +46,16 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
   }, [synth])
 
   const hasBrowserVoice = useCallback((lang: string) => Boolean(synth && pickVoice(voices, lang)), [synth, voices])
+
+  /** Runs the current reply's onDone exactly once (finished, failed or interrupted). */
+  const settle = useCallback(() => {
+    if (watchdogRef.current !== null) window.clearInterval(watchdogRef.current)
+    watchdogRef.current = null
+    utterancesRef.current = []
+    const done = doneRef.current
+    doneRef.current = null
+    done?.()
+  }, [])
 
   const stop = useCallback(() => {
     generationRef.current += 1
@@ -55,7 +69,8 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current)
     urlRef.current = null
     setSpeaking(false)
-  }, [synth])
+    settle()
+  }, [settle, synth])
 
   /** Call synchronously from a user gesture (the mic tap) so later playback is allowed. */
   const prime = useCallback(() => {
@@ -79,16 +94,30 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
     audioRef.current = el
     setSpeaking(true)
     startPlayback(el, url, () => {
-      if (generation === generationRef.current) setSpeaking(false)
+      if (generation !== generationRef.current) return
+      setSpeaking(false)
+      settle()
     })
-  }, [])
+  }, [settle])
 
-  /** Returns false when no engine could speak this language (caller may show a hint). */
+  /**
+   * Returns false when no engine could speak this language (caller may show a
+   * hint). `onDone` runs once when playback ends, fails, or is interrupted.
+   */
   const speak = useCallback(
-    async (text: string, lang: string, preSynthesized?: SpeechAudio | null): Promise<boolean> => {
+    async (text: string, lang: string, preSynthesized?: SpeechAudio | null, onDone?: () => void): Promise<boolean> => {
       stop()
       const generation = generationRef.current
-      if (!text.trim()) return true
+      doneRef.current = onDone ?? null
+      const finished = () => {
+        if (generation !== generationRef.current) return
+        setSpeaking(false)
+        settle()
+      }
+      if (!text.trim()) {
+        finished()
+        return true
+      }
       if (preSynthesized) {
         playAudio(preSynthesized, generation)
         return true
@@ -97,18 +126,22 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
       if (synth && voice) {
         const chunks = chunkForSpeech(text)
         setSpeaking(true)
-        chunks.forEach((chunk, i) => {
+        utterancesRef.current = chunks.map((chunk, i) => {
           const u = new SpeechSynthesisUtterance(chunk)
           u.voice = voice
           u.lang = voice.lang
           u.rate = 1
-          if (i === chunks.length - 1) {
-            u.onend = u.onerror = () => {
-              if (generation === generationRef.current) setSpeaking(false)
-            }
-          }
+          if (i === chunks.length - 1) u.onend = finished
+          u.onerror = finished
           synth.speak(u)
+          return u
         })
+        // Backstop for engines that drop onend: once the queue has drained, we're done.
+        let idleTicks = 0
+        watchdogRef.current = window.setInterval(() => {
+          idleTicks = synth.speaking || synth.pending ? 0 : idleTicks + 1
+          if (idleTicks >= 3) finished()
+        }, 500)
         return true
       }
       if (serverTtsAvailable) {
@@ -120,13 +153,14 @@ export function useSpeech(workbookId: string, serverTtsAvailable: boolean) {
           playAudio(res.audio, generation)
           return true
         } catch {
-          if (generation === generationRef.current) setSpeaking(false)
+          finished()
           return false
         }
       }
+      finished()
       return false
     },
-    [playAudio, serverTtsAvailable, stop, synth, voices, workbookId],
+    [playAudio, serverTtsAvailable, settle, stop, synth, voices, workbookId],
   )
 
   useEffect(() => stop, [stop])

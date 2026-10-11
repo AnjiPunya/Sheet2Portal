@@ -3,6 +3,8 @@ import { usePortalNav } from './portalContext'
 import { KPICard } from './KPICard'
 import { AlertsBanner } from './AlertsBanner'
 import { EntityView } from './EntityView'
+import { DashboardHero } from './DashboardHero'
+import { DashboardCharts } from './charts/DashboardCharts'
 
 export function Dashboard({ workbookId, config }: { workbookId: string; config: PortalConfig }) {
   const nav = usePortalNav()
@@ -13,30 +15,22 @@ export function Dashboard({ workbookId, config }: { workbookId: string; config: 
     ? primaryEntity.kpis.filter((k) => !alertKeys.has(k.key))
     : config.kpis.filter((k) => k.key.endsWith(':count') && !alertKeys.has(k.key)).slice(0, 4)
 
-  // The banner below already lists every alert (text summary + a button
-  // each), so the card grid only needs to headline the most pressing ones --
-  // otherwise a workbook with many entities turns the top of the dashboard
-  // into a wall of identical-looking cards.
-  const severityWeight = (severity: string | null) => (severity === 'critical' ? 0 : 1)
-  const headlineAlerts = [...config.alerts]
-    .sort((a, b) => severityWeight(a.severity) - severityWeight(b.severity) || (b.value ?? 0) - (a.value ?? 0))
-    .slice(0, 4)
-
   return (
     <div className="space-y-8">
+      <DashboardHero config={config} />
+
       <section className="space-y-3">
         <h2 className="section-label">Overview</h2>
         <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
           {summaryKpis.map((kpi) => (
             <KPICard key={kpi.key} kpi={kpi} />
           ))}
-          {headlineAlerts.map((alert) => (
-            <KPICard key={alert.key} kpi={alert} onClick={() => alert.entity && nav.openEntity(alert.entity)} />
-          ))}
         </div>
       </section>
 
       <AlertsBanner alerts={config.alerts} onSelectEntity={nav.openEntity} />
+
+      <DashboardCharts charts={config.charts ?? []} />
 
       {primaryEntity ? (
         <section className="space-y-4">

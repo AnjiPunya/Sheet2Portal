@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchRecords } from '../api/portal'
+import { fetchEntitySchema } from '../api/records'
 import type { EntityConfig, RecordItem } from '../types/portal'
 import type { RelatedFilter } from '../lib/portalView'
 import { formatLabel } from '../lib/labels'
@@ -12,6 +13,7 @@ import { EntityTable } from './EntityTable'
 import { RecordDetailModal } from './RecordDetailModal'
 import { KPICard } from './KPICard'
 import { StatusBreakdownChart } from './StatusBreakdownChart'
+import { RecordFormDialog } from './RecordFormDialog'
 
 const PAGE_SIZE = 24
 
@@ -31,7 +33,7 @@ function RelatedFilterChip({ filter, onClear }: { filter: RelatedFilter; onClear
           />
         </svg>
         <span className="truncate">
-          Filtered to {nav.labelFor(filter.worksheet).toLowerCase()} <strong className="font-semibold">{filter.label}</strong>
+          Filtered to {nav.singularFor(filter.worksheet).toLowerCase()} <strong className="font-semibold">{filter.label}</strong>
         </span>
       </p>
       <button
@@ -67,6 +69,15 @@ export function EntityView({
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<RecordItem | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  // Form schema also says whether this user may create records here.
+  const schemaQuery = useQuery({
+    queryKey: ['entity-schema', workbookId, entity.worksheet],
+    queryFn: () => fetchEntitySchema(workbookId, entity.worksheet),
+    staleTime: 30_000,
+  })
+  const canCreate = schemaQuery.data?.can_create === true
 
   const query = useQuery({
     queryKey: ['records', workbookId, entity.worksheet, related?.worksheet, related?.recordId, search, status, page],
@@ -85,7 +96,9 @@ export function EntityView({
   // Workbook-wide KPIs/chart would contradict a filtered list, so they're
   // hidden while a related filter is active.
   const showKpis = !embedded && !related && entity.kpis.length > 0
-  const hasChart = !related && entity.status_breakdown.length >= 2
+  // On the dashboard the Insights section already charts status, so the
+  // embedded view skips its own breakdown instead of repeating it.
+  const hasChart = !embedded && !related && entity.status_breakdown.length >= 2
   const loadError = query.error instanceof ApiRequestError ? query.error : null
 
   return (
@@ -109,6 +122,25 @@ export function EntityView({
       ) : null}
 
       {related && onClearRelated && <RelatedFilterChip filter={related} onClear={onClearRelated} />}
+
+      {entity.reference && (
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+          Reference sheet from the workbook (documentation, not business records): shown read-only and left out of
+          KPIs, charts and alerts.
+        </p>
+      )}
+
+      {canCreate && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setCreating(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+          >
+            <span aria-hidden className="text-base leading-none">+</span>
+            New {formatLabel(entity.singular_label).toLowerCase()}
+          </button>
+        </div>
+      )}
 
       <SearchFilterBar
         entity={entity}
@@ -160,6 +192,15 @@ export function EntityView({
             </button>
           </div>
         </div>
+      )}
+
+      {creating && (
+        <RecordFormDialog
+          workbookId={workbookId}
+          worksheet={entity.worksheet}
+          onClose={() => setCreating(false)}
+          onSaved={(result) => setSelected({ id: result.id, data: result.data })}
+        />
       )}
 
       {selected && (

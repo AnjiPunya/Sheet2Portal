@@ -46,6 +46,19 @@ class ChatContext:
 
     config: PortalConfig
     records_by_entity: dict[str, list[Record]] = field(default_factory=dict)
+    _index: object = field(default=None, repr=False)
+
+    @property
+    def index(self):
+        """Record names and links for this workbook (built once per turn)."""
+        if self._index is None:
+            from app.services.ai.references import build_index
+
+            self._index = build_index(self.config, self.records_by_entity)
+        return self._index
+
+    def name(self, record_id: str) -> str | None:
+        return self.index.labels.get(str(record_id))
 
 
 def _get_entity(config: PortalConfig, worksheet: str) -> EntityConfig:
@@ -126,6 +139,18 @@ def _strip_id(row: dict) -> tuple[str, dict]:
     return row.pop("__id"), row
 
 
+def _named(ctx: ChatContext, worksheet: str, record_id: str, data: dict) -> dict:
+    """A record as the model sees it: id (for further tool calls), its name
+    (what to call it in the answer), data, and names of referenced records."""
+    from app.services.records.display import display_labels
+
+    out = {"id": record_id, "label": ctx.name(record_id), "data": data}
+    names = display_labels(ctx.index.record_ctx, worksheet, data)
+    if names:
+        out["references"] = names
+    return out
+
+
 def tool_list_entities(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
     return {
         "entities": [
@@ -170,11 +195,11 @@ def tool_list_records(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
     rows = _apply_filters(rows, entity, args.get("filters"))
 
     try:
-        page = max(1, int(args.get("page", 1)))
+        page = max(1, int(args.get("page") or 1))
     except (TypeError, ValueError):
         raise ToolValidationError("'page' must be an integer") from None
     try:
-        page_size = min(int(args.get("page_size", _DEFAULT_PAGE_SIZE)), max_page_size)
+        page_size = min(int(args.get("page_size") or _DEFAULT_PAGE_SIZE), max_page_size)
     except (TypeError, ValueError):
         raise ToolValidationError("'page_size' must be an integer") from None
     page_size = max(1, page_size)
@@ -188,7 +213,7 @@ def tool_list_records(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
         "total": total,
         "page": page,
         "page_size": page_size,
-        "records": [dict(id=rid, data=data) for rid, data in (_strip_id(r) for r in page_rows)],
+        "records": [_named(ctx, worksheet, rid, data) for rid, data in (_strip_id(r) for r in page_rows)],
     }
 
 
@@ -202,7 +227,7 @@ def tool_get_record(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
     record = next((r for r in ctx.records_by_entity.get(worksheet, []) if str(r.id) == str(record_id)), None)
     if record is None:
         raise ToolValidationError(f"Record '{record_id}' not found in '{worksheet}'")
-    return {"worksheet": worksheet, "id": str(record.id), "data": record.data}
+    return {"worksheet": worksheet, **_named(ctx, worksheet, str(record.id), record.data)}
 
 
 def tool_aggregate(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
@@ -222,6 +247,7 @@ def tool_aggregate(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
             "operation": "count",
             "value": len(rows),
             "matched_record_ids": [r["__id"] for r in rows[:20]],
+            "matched_records": [ctx.name(r["__id"]) for r in rows[:20]],
         }
 
     field_name = args.get("field")
@@ -260,6 +286,7 @@ def tool_aggregate(ctx: ChatContext, args: dict, max_page_size: int) -> dict:
         "value": value,
         "matched_count": len(values),
         "matched_record_ids": [r["__id"] for r in rows[:20]],
+        "matched_records": [ctx.name(r["__id"]) for r in rows[:20]],
     }
 
 
@@ -280,7 +307,9 @@ def tool_traverse_relationship(ctx: ChatContext, args: dict, max_page_size: int)
     }
     related = related_rows_for(worksheet, record.data, ctx.config, rows_by_entity)
     for group in related:
-        group["records"] = group["records"][:_MAX_RELATED_PER_GROUP]
+        group["records"] = [
+            _named(ctx, group["entity"], r["id"], r["data"]) for r in group["records"][:_MAX_RELATED_PER_GROUP]
+        ]
 
     return {"worksheet": worksheet, "record_id": str(record_id), "related": related}
 
@@ -298,9 +327,9 @@ TOOL_SPECS: list[ToolSpec] = [
             "type": "object",
             "properties": {
                 "worksheet": {"type": "string", "description": "Exact worksheet name from list_entities"},
-                "search": {"type": "string", "description": "Free-text search across the worksheet's text columns"},
+                "search": {"type": ["string", "null"], "description": "Free-text search across the worksheet's text columns"},
                 "filters": {
-                    "type": "array",
+                    "type": ["array", "null"],
                     "items": {
                         "type": "object",
                         "properties": {
@@ -311,8 +340,8 @@ TOOL_SPECS: list[ToolSpec] = [
                         "required": ["field", "operator", "value"],
                     },
                 },
-                "page": {"type": "integer", "minimum": 1},
-                "page_size": {"type": "integer", "minimum": 1},
+                "page": {"type": ["integer", "null"], "minimum": 1},
+                "page_size": {"type": ["integer", "null"], "minimum": 1},
             },
             "required": ["worksheet"],
             "additionalProperties": False,
@@ -336,9 +365,9 @@ TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "worksheet": {"type": "string"},
                 "operation": {"type": "string", "enum": sorted(_AGGREGATE_OPERATIONS)},
-                "field": {"type": "string", "description": "Required for sum/avg/min/max; omit for count"},
+                "field": {"type": ["string", "null"], "description": "Required for sum/avg/min/max; omit or null for count"},
                 "filters": {
-                    "type": "array",
+                    "type": ["array", "null"],
                     "items": {
                         "type": "object",
                         "properties": {

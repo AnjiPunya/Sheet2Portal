@@ -52,7 +52,7 @@ def test_unknown_domain_falls_back_to_cleaned_filename_not_invented_domain():
 def test_ambiguous_domain_tie_falls_back_to_cleaned_filename():
     # Equal evidence for two domains -- not confident enough to pick one.
     title = generate_portal_title("sales_and_inventory_summary.xlsx")
-    assert title == "Sales And Inventory Summary"
+    assert title == "Sales and Inventory Summary"  # connecting words stay lower-case
 
 
 def test_all_filler_words_does_not_collapse_to_empty():
