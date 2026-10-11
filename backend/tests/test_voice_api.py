@@ -31,6 +31,10 @@ class RecordingProvider:
 
     async def chat(self, messages, tools=None):
         self.calls.append(list(messages))
+        if not self._results and tools is None and (messages[0].content or "").startswith("Rewrite"):
+            # Language-guard rewrite request with nothing scripted: echo the
+            # answer back unchanged (so the original is kept).
+            return _answer(messages[-1].content)
         return self._results.pop(0)
 
 
@@ -52,6 +56,14 @@ def _patch_llm(monkeypatch, provider):
     from app.api.routes import voice as voice_route
 
     monkeypatch.setattr(voice_route, "get_provider", lambda settings, requested=None: provider)
+
+
+@pytest.fixture(autouse=True)
+def _no_fallback_llms(monkeypatch):
+    """Never build real fallback LLM providers in tests (they'd hit the network)."""
+    from app.api.routes import voice as voice_route
+
+    monkeypatch.setattr(voice_route, "fallback_providers", lambda primary_name: [])
 
 
 @pytest.fixture
@@ -225,6 +237,52 @@ def test_other_provider_errors_are_not_retried(client, multi_sheet_xlsx, keys, a
     r = _turn(client, workbook_id)
     assert r.status_code == 502
     assert r.json()["detail"]["error_code"] == "PROVIDER_ERROR"
+
+
+def test_llm_rate_limit_falls_back_to_next_provider(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    from app.api.routes import voice as voice_route
+
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("What is the total budget?", language="english")
+    _patch_llm(monkeypatch, RaisingProvider(ProviderRateLimited("fake", retry_after=30.0)))
+    backup = RecordingProvider([_answer("The total budget is 35000.")])
+    backup.name = "backup"
+    monkeypatch.setattr(voice_route, "fallback_providers", lambda primary_name: [backup])
+
+    r = _turn(client, workbook_id)
+    assert r.status_code == 200
+    assert r.json()["provider"] == "backup"
+    assert r.json()["message"] == "The total budget is 35000."
+
+
+def test_english_reply_to_mixed_question_is_rewritten_keeping_numbers(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("Projects sheet లో total budget ఎంత?")
+    llm = RecordingProvider([_answer("Total budget is 35,000 from Projects."), _answer("Projects లో total budget 35000.")])
+    _patch_llm(monkeypatch, llm)
+    body = _turn(client, workbook_id).json()
+    assert body["message"] == "Projects లో total budget 35000."
+    rewrite_call = llm.calls[-1]
+    assert rewrite_call[0].content.startswith("Rewrite") and "code-mixed" in rewrite_call[0].content
+    assert rewrite_call[1].content == "Total budget is 35,000 from Projects."
+
+
+def test_rewrite_that_changes_numbers_is_rejected(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("మొత్తం బడ్జెట్ ఎంత?")
+    llm = RecordingProvider([_answer("Total budget is 35000."), _answer("మొత్తం బడ్జెట్ 3500.")])
+    _patch_llm(monkeypatch, llm)
+    body = _turn(client, workbook_id).json()
+    assert body["message"] == "Total budget is 35000."  # grounded original kept
+
+
+def test_english_reply_to_english_question_is_not_rewritten(client, multi_sheet_xlsx, keys, apis, monkeypatch):
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("What is the total budget?", language="english")
+    llm = RecordingProvider([_answer("35000.")])
+    _patch_llm(monkeypatch, llm)
+    assert _turn(client, workbook_id).status_code == 200
+    assert len(llm.calls) == 1
 
 
 def test_transcribe_then_respond_flow(client, multi_sheet_xlsx, keys, apis, monkeypatch):
@@ -417,6 +475,18 @@ def test_empty_audio_rejected_without_calling_stt(client, multi_sheet_xlsx, keys
     assert r.status_code == 422
     assert r.json()["detail"]["error_code"] == "EMPTY_AUDIO"
     assert apis.requests == []
+
+
+def test_amara_hallucination_on_silence_is_no_speech(client, multi_sheet_xlsx, keys, apis):
+    # Real Whisper output for 2.5s of digital silence in the browser e2e run.
+    workbook_id = _upload(client, multi_sheet_xlsx)
+    apis.groq("Subtitles by the Amara.org community", language="english", no_speech=0.05)
+    r = client.post(
+        f"/api/workbooks/{workbook_id}/voice/transcribe",
+        files={"audio": ("speech.webm", WEBM_AUDIO, "audio/webm")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "NO_SPEECH_DETECTED"
 
 
 def test_silent_audio_is_no_speech(client, multi_sheet_xlsx, keys, apis, monkeypatch):

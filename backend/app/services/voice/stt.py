@@ -36,11 +36,17 @@ _BASE_PROMPT = (
 )
 _EN_PROMPT = "A question about spreadsheet data, like total budget, pending tasks or overdue items."
 
-# Whisper famously "hears" these on silent or near-silent clips.
-_HALLUCINATIONS = {
-    "thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay",
-    "subtitles by the amaraorg community", "please subscribe", "ధన్యవాదాలు",
+# Whisper famously "hears" these on silent or near-silent clips. The first
+# set is never a plausible question to a data assistant, so it always counts
+# as silence (live: "Subtitles by the Amara.org community" came back for
+# pure silence with a low no_speech_prob). The second set could be real
+# speech, so it only counts when Whisper itself suspects silence.
+_ALWAYS_HALLUCINATIONS = {
+    "thanks for watching", "thank you for watching", "subtitles by the amaraorg community",
+    "please subscribe", "like and subscribe",
 }
+_HALLUCINATION_MARKERS = ("amaraorg", "subtitles by", "transcribed by")
+_HALLUCINATIONS = {"thank you", "you", "bye", "okay", "ధన్యవాదాలు"}
 _NO_SPEECH_THRESHOLD = 0.6
 
 
@@ -78,6 +84,8 @@ def looks_silent(text: str, segments: list[dict], prompt: str) -> bool:
     if segments and all((s.get("no_speech_prob") or 0) >= _NO_SPEECH_THRESHOLD for s in segments):
         return True
     max_no_speech = max(((s.get("no_speech_prob") or 0) for s in segments), default=0)
+    if norm in _ALWAYS_HALLUCINATIONS or any(m in norm for m in _HALLUCINATION_MARKERS):
+        return True
     if norm in _HALLUCINATIONS and max_no_speech >= 0.2:
         return True
     # On silence Whisper sometimes just echoes its prompt back. Only long

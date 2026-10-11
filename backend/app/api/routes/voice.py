@@ -43,6 +43,7 @@ from app.services.ai.base import (
     ProviderTimeout,
     ProviderUnavailable,
 )
+from app.services.ai.providers import build_provider, configured_providers
 from app.services.ai.registry import get_provider
 from app.services.ai.tools import ChatContext
 from app.services.voice import stt, tts
@@ -74,6 +75,12 @@ def _provider_http_error(exc: ProviderError, what: str) -> HTTPException:
     if isinstance(exc, ProviderRejectedAudio):
         return _error(422, "AUDIO_UNREADABLE", "The recording couldn't be decoded. Please try recording again.")
     return _error(502, "PROVIDER_ERROR", str(exc))
+
+
+def fallback_providers(primary_name: str) -> list:
+    """Other configured LLM providers, tried in order if the primary is rate limited."""
+    names = [n for n in configured_providers(settings) if n != primary_name]
+    return [p for p in (build_provider(n, settings) for n in names) if p is not None]
 
 
 def _require_enabled() -> None:
@@ -128,7 +135,14 @@ async def _reply(ctx: ChatContext, messages: list[ChatMessageIn], mode: str, wan
     language = reply_language(history, mode, stt_language)
     try:
         return await run_voice_reply(
-            provider, history, ctx, language, settings, voice_settings, want_tts and tts.server_tts_available(settings, voice_settings)
+            provider,
+            history,
+            ctx,
+            language,
+            settings,
+            voice_settings,
+            want_tts and tts.server_tts_available(settings, voice_settings),
+            fallbacks=fallback_providers(provider.name),
         )
     except ProviderError as exc:
         raise _provider_http_error(exc, provider.name) from exc
